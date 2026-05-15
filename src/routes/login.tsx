@@ -1,4 +1,4 @@
-import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import { getMe } from "@/lib/me.functions";
 import { SESSION_STORAGE_KEY } from "@/lib/session-attacher";
@@ -16,7 +16,7 @@ export const Route = createFileRoute("/login")({
 });
 
 function LoginPage() {
-  const navigate = useNavigate();
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -40,7 +40,8 @@ function LoginPage() {
       if (body.token && typeof window !== "undefined") {
         window.localStorage.setItem(SESSION_STORAGE_KEY, body.token);
       }
-      await navigate({ to: "/" });
+      await router.invalidate();
+      await router.navigate({ to: "/" });
     } catch (e) {
       setErr((e as Error).message);
       setLoading(false);
