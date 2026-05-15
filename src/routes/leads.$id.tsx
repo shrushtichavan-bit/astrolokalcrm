@@ -1,5 +1,5 @@
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { getMe } from "@/lib/me.functions";
@@ -245,6 +245,11 @@ function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => 
   const [kam, setKam] = useState("");
 
   const hasConnected = attempts.some((a) => a.connected);
+  const forcedRnr = !hasConnected && attempts.length >= 3;
+
+  useEffect(() => {
+    if (forcedRnr) setStatusVal("rnr");
+  }, [forcedRnr]);
 
   async function logAttempt(connected: boolean) {
     if (nextAttempt == null) return;
@@ -290,40 +295,56 @@ function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => 
         <Separator />
 
         <section className="space-y-3">
-          <h3 className="text-sm font-medium">Set calling status {!hasConnected && <span className="text-xs text-muted-foreground">(needs ≥1 connected attempt)</span>}</h3>
-          <div className="grid gap-3 sm:grid-cols-2">
+          <h3 className="text-sm font-medium">
+            Set calling status{" "}
+            {forcedRnr ? (
+              <span className="text-xs text-muted-foreground">(auto-marked RNR after 3 unanswered attempts)</span>
+            ) : !hasConnected ? (
+              <span className="text-xs text-muted-foreground">(needs ≥1 connected attempt)</span>
+            ) : null}
+          </h3>
+          {forcedRnr ? (
             <div>
               <Label>Status</Label>
-              <Select value={statusVal} onValueChange={setStatusVal}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="connected">Connected → assign KAM</SelectItem>
-                  <SelectItem value="rnr">Ring no response</SelectItem>
-                  <SelectItem value="reconnect">Reconnect later</SelectItem>
-                  <SelectItem value="not_interested">Not interested</SelectItem>
-                  <SelectItem value="junk">Junk</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="mt-1">
+                <Badge variant="secondary">Ring no response (RNR)</Badge>
+              </div>
             </div>
-            {statusVal === "connected" && (
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2">
               <div>
-                <Label>Assign KAM (Round 1 pool)</Label>
-                <Select value={kam} onValueChange={setKam}>
-                  <SelectTrigger><SelectValue placeholder="Choose KAM" /></SelectTrigger>
+                <Label>Status</Label>
+                <Select value={statusVal} onValueChange={setStatusVal}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {(poolQ.data?.members ?? []).map((m) => (
-                      <SelectItem key={m} value={m}>{m}</SelectItem>
-                    ))}
+                    <SelectItem value="connected">Connected → assign KAM</SelectItem>
+                    <SelectItem value="rnr">Ring no response</SelectItem>
+                    <SelectItem value="reconnect">Reconnect later</SelectItem>
+                    <SelectItem value="not_interested">Not interested</SelectItem>
+                    <SelectItem value="junk">Junk</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-            )}
-          </div>
+              {statusVal === "connected" && (
+                <div>
+                  <Label>Assign KAM (Round 1 pool)</Label>
+                  <Select value={kam} onValueChange={setKam}>
+                    <SelectTrigger><SelectValue placeholder="Choose KAM" /></SelectTrigger>
+                    <SelectContent>
+                      {(poolQ.data?.members ?? []).map((m) => (
+                        <SelectItem key={m} value={m}>{m}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
+          )}
           <div>
             <Label>Remarks</Label>
             <Textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2} />
           </div>
-          <Button onClick={submitStatus} disabled={busy || !hasConnected || (statusVal === "connected" && !kam)}>
+          <Button onClick={submitStatus} disabled={busy || (!forcedRnr && (!hasConnected || (statusVal === "connected" && !kam)))}>
             {status ? "Update status" : "Save status"}
           </Button>
         </section>
