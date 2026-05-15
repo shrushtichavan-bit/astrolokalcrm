@@ -200,14 +200,16 @@ export const setCallingStatus = createServerFn({ method: "POST" })
     const lead = await loadLeadOwned(data.lead_id, u.email);
     if (lead.current_stage !== "calling_pending") throw new Error("Lead is not in calling stage");
 
-    const { data: anyConnected } = await supabaseAdmin
-      .from("call_attempts")
-      .select("id")
-      .eq("lead_id", lead.id)
-      .eq("connected", true)
-      .limit(1);
-    if (!anyConnected || anyConnected.length === 0)
-      throw new Error("Need at least one connected attempt before setting status");
+    if (data.status === "connected") {
+      const { data: anyConnected } = await supabaseAdmin
+        .from("call_attempts")
+        .select("id")
+        .eq("lead_id", lead.id)
+        .eq("connected", true)
+        .limit(1);
+      if (!anyConnected || anyConnected.length === 0)
+        throw new Error("Need at least one connected attempt before setting status to Connected");
+    }
 
     let assignedKam: string | null = null;
     if (data.status === "connected") {
