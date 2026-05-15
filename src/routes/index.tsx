@@ -54,12 +54,22 @@ type Lead = {
 
 function Dashboard() {
   const { user } = Route.useLoaderData();
+  const qc = useQueryClient();
   const fetchLeads = useServerFn(listMyLeads);
+  const fetchLead = useServerFn(getLead);
   const leadsQ = useQuery({
     queryKey: ["my-leads"],
     queryFn: () => fetchLeads(),
     staleTime: 30_000,
   });
+
+  function prefetchLead(id: string) {
+    qc.prefetchQuery({
+      queryKey: ["lead", id],
+      queryFn: () => fetchLead({ data: { id } }),
+      staleTime: 15_000,
+    });
+  }
 
   const { grouped, pendingCount, totalCount, pendingByStage } = useMemo(() => {
     const leads = (leadsQ.data?.leads ?? []) as Lead[];
