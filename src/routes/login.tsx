@@ -40,7 +40,7 @@ function LoginPage() {
       if (body.token && typeof window !== "undefined") {
         window.localStorage.setItem(SESSION_STORAGE_KEY, body.token);
       }
-      navigate({ to: "/", reloadDocument: true });
+      await navigate({ to: "/" });
     } catch (e) {
       setErr((e as Error).message);
       setLoading(false);
