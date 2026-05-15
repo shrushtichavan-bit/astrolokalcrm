@@ -234,7 +234,8 @@ function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => 
     const last = attempts[attempts.length - 1];
     if (!last) return 1;
     if (last.connected) return null;
-    return Math.min(3, last.attempt_number + 1);
+    if (last.attempt_number >= 3) return null;
+    return last.attempt_number + 1;
   }, [attempts]);
 
   const [busy, setBusy] = useState(false);
