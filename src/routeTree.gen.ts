@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as SyncRouteImport } from './routes/sync'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as LeadsIdRouteImport } from './routes/leads.$id'
 import { Route as ApiAuthLoginRouteImport } from './routes/api/auth/login'
 import { Route as ApiPublicHooksSyncExpertsRouteImport } from './routes/api/public/hooks/sync-experts'
 
@@ -30,6 +31,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LeadsIdRoute = LeadsIdRouteImport.update({
+  id: '/leads/$id',
+  path: '/leads/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAuthLoginRoute = ApiAuthLoginRouteImport.update({
   id: '/api/auth/login',
   path: '/api/auth/login',
@@ -46,6 +52,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/sync': typeof SyncRoute
+  '/leads/$id': typeof LeadsIdRoute
   '/api/auth/login': typeof ApiAuthLoginRoute
   '/api/public/hooks/sync-experts': typeof ApiPublicHooksSyncExpertsRoute
 }
@@ -53,6 +60,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/sync': typeof SyncRoute
+  '/leads/$id': typeof LeadsIdRoute
   '/api/auth/login': typeof ApiAuthLoginRoute
   '/api/public/hooks/sync-experts': typeof ApiPublicHooksSyncExpertsRoute
 }
@@ -61,6 +69,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/sync': typeof SyncRoute
+  '/leads/$id': typeof LeadsIdRoute
   '/api/auth/login': typeof ApiAuthLoginRoute
   '/api/public/hooks/sync-experts': typeof ApiPublicHooksSyncExpertsRoute
 }
@@ -70,6 +79,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/sync'
+    | '/leads/$id'
     | '/api/auth/login'
     | '/api/public/hooks/sync-experts'
   fileRoutesByTo: FileRoutesByTo
@@ -77,6 +87,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/sync'
+    | '/leads/$id'
     | '/api/auth/login'
     | '/api/public/hooks/sync-experts'
   id:
@@ -84,6 +95,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/sync'
+    | '/leads/$id'
     | '/api/auth/login'
     | '/api/public/hooks/sync-experts'
   fileRoutesById: FileRoutesById
@@ -92,6 +104,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
   SyncRoute: typeof SyncRoute
+  LeadsIdRoute: typeof LeadsIdRoute
   ApiAuthLoginRoute: typeof ApiAuthLoginRoute
   ApiPublicHooksSyncExpertsRoute: typeof ApiPublicHooksSyncExpertsRoute
 }
@@ -119,6 +132,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/leads/$id': {
+      id: '/leads/$id'
+      path: '/leads/$id'
+      fullPath: '/leads/$id'
+      preLoaderRoute: typeof LeadsIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/auth/login': {
       id: '/api/auth/login'
       path: '/api/auth/login'
@@ -140,9 +160,20 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
   SyncRoute: SyncRoute,
+  LeadsIdRoute: LeadsIdRoute,
   ApiAuthLoginRoute: ApiAuthLoginRoute,
   ApiPublicHooksSyncExpertsRoute: ApiPublicHooksSyncExpertsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
