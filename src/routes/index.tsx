@@ -54,7 +54,7 @@ function Dashboard() {
                 <CardContent className="p-3">
                   <div className="text-xs text-muted-foreground">{b.label}</div>
                   <div className="mt-1 text-2xl font-semibold">{b.count}</div>
-                  <div className="text-xs text-muted-foreground">{(b.pct * 100).toFixed(0)}%</div>
+                  <div className="text-xs text-muted-foreground">{b.pct}%</div>
                 </CardContent>
               </Card>
             ))}
