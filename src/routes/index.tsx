@@ -1,10 +1,11 @@
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
+import { useMemo } from "react";
 import { getMe } from "@/lib/me.functions";
-import { listMyLeads, getFunnel } from "@/lib/leads.functions";
+import { listMyLeads } from "@/lib/leads.functions";
 import { AppShell } from "@/components/AppShell";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
 export const Route = createFileRoute("/")({
@@ -31,77 +32,155 @@ const STAGE_LABELS: Record<string, string> = {
   not_interested: "Not Interested",
 };
 
+const PENDING_STAGES = new Set([
+  "calling_pending",
+  "round_1_pending",
+  "round_2_pending",
+  "round_3_pending",
+  "round_4_pending",
+  "profile_creation_pending",
+]);
+
+type Lead = {
+  id: string;
+  lead_id: string;
+  name: string;
+  contact: string;
+  source: string | null;
+  priority: number;
+  current_stage: string;
+  updated_at: string;
+};
+
 function Dashboard() {
   const { user } = Route.useLoaderData();
   const fetchLeads = useServerFn(listMyLeads);
-  const fetchFunnel = useServerFn(getFunnel);
-  const leadsQ = useQuery({ queryKey: ["my-leads"], queryFn: () => fetchLeads() });
-  const funnelQ = useQuery({ queryKey: ["funnel"], queryFn: () => fetchFunnel() });
+  const leadsQ = useQuery({
+    queryKey: ["my-leads"],
+    queryFn: () => fetchLeads(),
+    staleTime: 30_000,
+  });
 
-  const grouped: Record<string, typeof leadsQ.data extends { leads: infer L } ? L : never[]> = {};
-  for (const l of leadsQ.data?.leads ?? []) {
-    (grouped[l.current_stage] ||= [] as never).push(l as never);
-  }
+  const { grouped, pendingCount, totalCount, pendingByStage } = useMemo(() => {
+    const leads = (leadsQ.data?.leads ?? []) as Lead[];
+    const g: Record<string, Lead[]> = {};
+    const pbs: Record<string, number> = {};
+    let pending = 0;
+    for (const l of leads) {
+      (g[l.current_stage] ||= []).push(l);
+      if (PENDING_STAGES.has(l.current_stage)) {
+        pending++;
+        pbs[l.current_stage] = (pbs[l.current_stage] ?? 0) + 1;
+      }
+    }
+    return { grouped: g, pendingCount: pending, totalCount: leads.length, pendingByStage: pbs };
+  }, [leadsQ.data]);
+
+  const pendingStages = Object.keys(pendingByStage).sort();
+  const groupedKeys = Object.keys(grouped).sort((a, b) => {
+    const ap = PENDING_STAGES.has(a) ? 0 : 1;
+    const bp = PENDING_STAGES.has(b) ? 0 : 1;
+    if (ap !== bp) return ap - bp;
+    return a.localeCompare(b);
+  });
 
   return (
     <AppShell user={user}>
-      <div className="space-y-6">
-        <section>
-          <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-muted-foreground">Funnel</h2>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-8">
-            {funnelQ.data?.rows?.map((b) => (
-              <Card key={b.key}>
-                <CardContent className="p-3">
-                  <div className="text-xs text-muted-foreground">{b.label}</div>
-                  <div className="mt-1 text-2xl font-semibold">{b.count}</div>
-                  <div className="text-xs text-muted-foreground">{b.pct}%</div>
+      <div className="space-y-8">
+        <section className="space-y-1">
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Hi {user.name.split(" ")[0]}
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            {leadsQ.isLoading
+              ? "Loading your leads…"
+              : pendingCount === 0
+              ? `You're all caught up. ${totalCount} lead${totalCount === 1 ? "" : "s"} assigned.`
+              : `${pendingCount} pending of ${totalCount} assigned to you.`}
+          </p>
+        </section>
+
+        {pendingStages.length > 0 && (
+          <section className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+            {pendingStages.map((s) => (
+              <Card key={s} className="border-primary/20">
+                <CardContent className="p-4">
+                  <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                    {STAGE_LABELS[s] ?? s}
+                  </div>
+                  <div className="mt-1 text-3xl font-semibold tabular-nums">
+                    {pendingByStage[s]}
+                  </div>
                 </CardContent>
               </Card>
             ))}
-          </div>
-        </section>
+          </section>
+        )}
 
-        <section>
-          <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-muted-foreground">My Leads</h2>
-          {leadsQ.isLoading && <div className="text-sm text-muted-foreground">Loading…</div>}
-          {leadsQ.error && <div className="text-sm text-destructive">{(leadsQ.error as Error).message}</div>}
+        <section className="space-y-4">
+          {leadsQ.error && (
+            <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+              {(leadsQ.error as Error).message}
+            </div>
+          )}
           {leadsQ.data && leadsQ.data.leads.length === 0 && (
-            <div className="rounded-md border bg-background p-6 text-sm text-muted-foreground">
+            <div className="rounded-md border bg-background p-8 text-center text-sm text-muted-foreground">
               No leads assigned to you yet.
             </div>
           )}
-          <div className="space-y-4">
-            {Object.entries(grouped).map(([stage, leads]) => (
+
+          {groupedKeys.map((stage) => {
+            const leads = grouped[stage];
+            const isPending = PENDING_STAGES.has(stage);
+            return (
               <Card key={stage}>
-                <CardHeader className="py-3">
-                  <CardTitle className="flex items-center justify-between text-sm">
-                    <span>{STAGE_LABELS[stage] ?? stage}</span>
-                    <Badge variant="secondary">{(leads as unknown[]).length}</Badge>
-                  </CardTitle>
-                </CardHeader>
+                <div className="flex items-center justify-between border-b px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">
+                      {STAGE_LABELS[stage] ?? stage}
+                    </span>
+                    {isPending && (
+                      <Badge variant="default" className="h-5 px-1.5 text-[10px]">
+                        Action needed
+                      </Badge>
+                    )}
+                  </div>
+                  <Badge variant="secondary">{leads.length}</Badge>
+                </div>
                 <CardContent className="p-0">
                   <table className="w-full text-sm">
-                    <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
+                    <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
                       <tr>
-                        <th className="px-4 py-2 text-left">Priority</th>
-                        <th className="px-4 py-2 text-left">Lead ID</th>
-                        <th className="px-4 py-2 text-left">Name</th>
+                        <th className="w-10 px-4 py-2 text-left">#</th>
+                        <th className="px-4 py-2 text-left">Lead</th>
                         <th className="px-4 py-2 text-left">Contact</th>
-                        <th className="px-4 py-2 text-left">Source</th>
+                        <th className="hidden px-4 py-2 text-left md:table-cell">Source</th>
                         <th className="px-4 py-2"></th>
                       </tr>
                     </thead>
                     <tbody>
-                      {(leads as Array<{ id: string; lead_id: string; name: string; contact: string; source: string | null; priority: number }>).map((l) => (
-                        <tr key={l.id} className="border-t">
-                          <td className="px-4 py-2">{l.priority}</td>
-                          <td className="px-4 py-2 font-mono text-xs">{l.lead_id}</td>
-                          <td className="px-4 py-2">{l.name}</td>
+                      {leads.map((l) => (
+                        <tr key={l.id} className="border-t hover:bg-muted/30">
+                          <td className="px-4 py-2 text-muted-foreground tabular-nums">
+                            {l.priority}
+                          </td>
+                          <td className="px-4 py-2">
+                            <div className="font-medium">{l.name}</div>
+                            <div className="font-mono text-[11px] text-muted-foreground">
+                              {l.lead_id}
+                            </div>
+                          </td>
                           <td className="px-4 py-2">{l.contact}</td>
-                          <td className="px-4 py-2 text-muted-foreground">{l.source ?? "—"}</td>
+                          <td className="hidden px-4 py-2 text-muted-foreground md:table-cell">
+                            {l.source ?? "—"}
+                          </td>
                           <td className="px-4 py-2 text-right">
-                            <Link to="/leads/$id" params={{ id: l.id }} className="text-primary text-xs underline">
-                              Open
+                            <Link
+                              to="/leads/$id"
+                              params={{ id: l.id }}
+                              className="text-xs font-medium text-primary hover:underline"
+                            >
+                              Open →
                             </Link>
                           </td>
                         </tr>
@@ -110,8 +189,8 @@ function Dashboard() {
                   </table>
                 </CardContent>
               </Card>
-            ))}
-          </div>
+            );
+          })}
         </section>
       </div>
     </AppShell>
