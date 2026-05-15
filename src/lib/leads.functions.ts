@@ -144,12 +144,16 @@ export const logCallAttempt = createServerFn({ method: "POST" })
       if (prev.connected)
         throw new Error(`Cannot log attempt ${data.attempt_number} — previous already connected`);
     }
-    const { error } = await supabaseAdmin.from("call_attempts").insert({
-      lead_id: lead.id,
-      attempt_number: data.attempt_number,
-      connected: data.connected,
-      attempted_by: u.email,
-    });
+    const { error } = await supabaseAdmin.from("call_attempts").upsert(
+      {
+        lead_id: lead.id,
+        attempt_number: data.attempt_number,
+        connected: data.connected,
+        attempted_by: u.email,
+        attempted_at: new Date().toISOString(),
+      },
+      { onConflict: "lead_id,attempt_number" },
+    );
     if (error) throw new Error(error.message);
     await appendAudit(lead.id, `attempt_${data.attempt_number}:${data.connected ? "yes" : "no"}`, u.email);
     return { ok: true };
