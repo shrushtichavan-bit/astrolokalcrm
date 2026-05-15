@@ -49,6 +49,7 @@ export const Route = createFileRoute("/api/auth/login")({
         return new Response(
           JSON.stringify({
             user: { name: user.name, email: user.email, role: user.role },
+            token,
           }),
           {
             status: 200,

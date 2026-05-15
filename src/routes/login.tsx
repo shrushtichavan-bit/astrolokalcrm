@@ -1,6 +1,7 @@
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { getMe } from "@/lib/me.functions";
+import { SESSION_STORAGE_KEY } from "@/lib/session-attacher";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,15 +31,18 @@ function LoginPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
+        credentials: "same-origin",
       });
+      const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j.error || "Login failed");
+        throw new Error(body.error || `Login failed (${res.status})`);
+      }
+      if (body.token && typeof window !== "undefined") {
+        window.localStorage.setItem(SESSION_STORAGE_KEY, body.token);
       }
       navigate({ to: "/", reloadDocument: true });
     } catch (e) {
       setErr((e as Error).message);
-    } finally {
       setLoading(false);
     }
   }

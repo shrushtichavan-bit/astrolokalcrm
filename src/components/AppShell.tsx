@@ -1,5 +1,6 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
+import { SESSION_STORAGE_KEY } from "@/lib/session-attacher";
 
 export function AppShell({
   user,
@@ -10,7 +11,14 @@ export function AppShell({
 }) {
   const navigate = useNavigate();
   async function logout() {
-    await fetch("/api/auth/login", { method: "DELETE" });
+    try {
+      await fetch("/api/auth/login", { method: "DELETE" });
+    } catch {
+      /* ignore */
+    }
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(SESSION_STORAGE_KEY);
+    }
     navigate({ to: "/login", reloadDocument: true });
   }
   return (
