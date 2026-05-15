@@ -49,14 +49,12 @@ function Dashboard() {
         <section>
           <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-muted-foreground">Funnel</h2>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-8">
-            {funnelQ.data?.buckets?.map((b: { key: string; label: string; count: number; conversion: number | null }) => (
+            {funnelQ.data?.rows?.map((b) => (
               <Card key={b.key}>
                 <CardContent className="p-3">
                   <div className="text-xs text-muted-foreground">{b.label}</div>
                   <div className="mt-1 text-2xl font-semibold">{b.count}</div>
-                  {b.conversion != null && (
-                    <div className="text-xs text-muted-foreground">{(b.conversion * 100).toFixed(0)}%</div>
-                  )}
+                  <div className="text-xs text-muted-foreground">{(b.pct * 100).toFixed(0)}%</div>
                 </CardContent>
               </Card>
             ))}
