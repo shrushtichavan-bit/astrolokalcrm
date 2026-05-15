@@ -49,10 +49,11 @@ export const listMyLeads = createServerFn({ method: "GET" }).handler(async () =>
   const u = await requireUser();
   const { data, error } = await supabaseAdmin
     .from("leads")
-    .select("*")
+    .select("id, lead_id, name, contact, source, priority, current_stage, updated_at")
     .eq("current_owner_email", u.email)
     .order("priority", { ascending: true })
-    .order("updated_at", { ascending: false });
+    .order("updated_at", { ascending: false })
+    .limit(500);
   if (error) throw error;
   return { leads: data ?? [] };
 });
