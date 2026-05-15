@@ -344,7 +344,7 @@ function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => 
             <Label>Remarks</Label>
             <Textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2} />
           </div>
-          <Button onClick={submitStatus} disabled={busy || (!forcedRnr && (!hasConnected || (statusVal === "connected" && !kam)))}>
+          <Button onClick={submitStatus} disabled={busy || (!forcedRnr && statusVal === "connected" && (!hasConnected || !kam))}>
             {status ? "Update status" : "Save status"}
           </Button>
         </section>
