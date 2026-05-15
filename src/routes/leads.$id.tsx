@@ -245,6 +245,11 @@ function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => 
   const [kam, setKam] = useState("");
 
   const hasConnected = attempts.some((a) => a.connected);
+  const forcedRnr = !hasConnected && attempts.length >= 3;
+
+  useEffect(() => {
+    if (forcedRnr) setStatusVal("rnr");
+  }, [forcedRnr]);
 
   async function logAttempt(connected: boolean) {
     if (nextAttempt == null) return;
