@@ -19,7 +19,7 @@ export function AppShell({
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(SESSION_STORAGE_KEY);
     }
-    navigate({ to: "/login", reloadDocument: true });
+    await navigate({ to: "/login" });
   }
   return (
     <div className="min-h-screen bg-muted/20">
