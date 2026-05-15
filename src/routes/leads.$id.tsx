@@ -38,22 +38,49 @@ function LeadDetail() {
   const { id } = Route.useParams();
   const qc = useQueryClient();
   const fetchLead = useServerFn(getLead);
-  const leadQ = useQuery({ queryKey: ["lead", id], queryFn: () => fetchLead({ data: { id } }) });
+  const leadQ = useQuery({
+    queryKey: ["lead", id],
+    queryFn: () => fetchLead({ data: { id } }),
+    staleTime: 15_000,
+    retry: false,
+  });
 
   function refresh() {
     qc.invalidateQueries({ queryKey: ["lead", id] });
     qc.invalidateQueries({ queryKey: ["my-leads"] });
-    qc.invalidateQueries({ queryKey: ["funnel"] });
   }
+
+  const errMsg = leadQ.error ? (leadQ.error as Error).message : null;
+  const isForbidden = errMsg?.toLowerCase().includes("not your lead") || errMsg?.toLowerCase().includes("forbidden");
 
   return (
     <AppShell user={user}>
       <div className="mb-4">
-        <Link to="/" className="text-sm text-muted-foreground underline">← Back to dashboard</Link>
+        <Link to="/" className="text-sm text-muted-foreground hover:underline">← Back to dashboard</Link>
       </div>
-      {leadQ.isLoading && <div className="text-sm">Loading…</div>}
-      {leadQ.error && <div className="text-sm text-destructive">{(leadQ.error as Error).message}</div>}
-      {leadQ.data && (
+      {leadQ.isLoading && <div className="text-sm text-muted-foreground">Loading…</div>}
+      {errMsg && (
+        <Card>
+          <CardContent className="space-y-3 p-6">
+            <div className="text-base font-medium">
+              {isForbidden ? "This lead is no longer assigned to you" : "Couldn't load this lead"}
+            </div>
+            <p className="text-sm text-muted-foreground">
+              {isForbidden
+                ? "It may have been moved to another stage or owner. Head back to your dashboard to see your current leads."
+                : errMsg}
+            </p>
+            <Link
+              to="/"
+              onClick={() => qc.invalidateQueries({ queryKey: ["my-leads"] })}
+              className="inline-block text-sm font-medium text-primary hover:underline"
+            >
+              Back to dashboard →
+            </Link>
+          </CardContent>
+        </Card>
+      )}
+      {!errMsg && leadQ.data && (
         <div className="grid gap-6 lg:grid-cols-[2fr_3fr]">
           <LeadSummary data={leadQ.data} />
           <ActionsPanel data={leadQ.data} role={user.role} onChanged={refresh} />
