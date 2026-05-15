@@ -48,7 +48,17 @@ export const syncLeads = createServerFn({ method: "POST" }).handler(async () => 
     .in("lead_id", ids);
   const existingSet = new Set((existing ?? []).map((e) => e.lead_id));
 
-  const toInsert: Array<Record<string, unknown>> = [];
+  type LeadInsert = {
+    lead_id: string;
+    name: string;
+    contact: string;
+    source: string | null;
+    priority: number;
+    assigned_to_email: string;
+    current_stage: string;
+    current_owner_email: string;
+  };
+  const toInsert: LeadInsert[] = [];
   const errors: string[] = [];
   let skipped = 0;
   for (const r of rows) {
@@ -203,7 +213,7 @@ export const syncActiveExperts = createServerFn({ method: "POST" }).handler(asyn
     if (!map.has(p.expert_id)) continue;
     const desired = map.get(p.expert_id)!;
     if (desired === p.is_active) continue;
-    const update: Record<string, unknown> = { is_active: desired };
+    const update: { is_active: boolean; activated_at?: string } = { is_active: desired };
     if (desired && !p.is_active) update.activated_at = new Date().toISOString();
     await supabaseAdmin.from("expert_profiles").update(update).eq("id", p.id);
     if (desired) {
@@ -226,7 +236,7 @@ export const syncActiveExperts = createServerFn({ method: "POST" }).handler(asyn
       lead_id: lid,
       action: "stage_change:active",
       performed_by: "system:cron",
-      metadata: { source: "active_experts_sync" } as object,
+      metadata: { source: "active_experts_sync" } as never,
     }));
     await supabaseAdmin.from("audit_log").insert(auditRows);
   }

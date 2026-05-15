@@ -11,7 +11,7 @@ export async function appendAudit(
     lead_id: leadId,
     action,
     performed_by: performedBy,
-    metadata: metadata as object | null,
+    metadata: (metadata ?? null) as never,
   });
 }
 
