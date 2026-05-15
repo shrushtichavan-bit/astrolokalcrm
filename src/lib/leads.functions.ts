@@ -156,7 +156,26 @@ export const logCallAttempt = createServerFn({ method: "POST" })
     );
     if (error) throw new Error(error.message);
     await appendAudit(lead.id, `attempt_${data.attempt_number}:${data.connected ? "yes" : "no"}`, u.email);
-    return { ok: true };
+
+    // Auto-mark RNR if attempt 3 logged as not connected
+    let autoStatus: "rnr" | null = null;
+    if (data.attempt_number === 3 && !data.connected) {
+      const { error: csErr } = await supabaseAdmin.from("calling_status").upsert(
+        {
+          lead_id: lead.id,
+          status: "rnr",
+          remarks: "Auto-marked RNR after 3 unconnected attempts",
+          assigned_kam_email: null,
+          set_by: u.email,
+          set_at: new Date().toISOString(),
+        },
+        { onConflict: "lead_id" },
+      );
+      if (csErr) throw new Error(csErr.message);
+      await appendAudit(lead.id, "calling_status:rnr", u.email, { auto: true });
+      autoStatus = "rnr";
+    }
+    return { ok: true, auto_status: autoStatus };
   });
 
 export const setCallingStatus = createServerFn({ method: "POST" })
