@@ -1,7 +1,7 @@
 // Session + password helpers. Custom auth — does NOT use Supabase Auth.
 import bcrypt from "bcryptjs";
 import { SignJWT, jwtVerify } from "jose";
-import { getCookie } from "@tanstack/react-start/server";
+import { getCookie, getRequestHeader } from "@tanstack/react-start/server";
 
 const COOKIE_NAME = "astrolokal_session";
 const ALG = "HS256";
@@ -62,9 +62,14 @@ export function clearSessionCookieHeader() {
   return `${COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`;
 }
 
-/** For use inside createServerFn handlers — reads cookie from current request. */
+/** Reads session token from Authorization: Bearer header OR cookie. */
 export async function getSessionUser(): Promise<SessionUser | null> {
-  const token = getCookie(COOKIE_NAME);
+  const auth = getRequestHeader("authorization") ?? getRequestHeader("Authorization");
+  let token: string | undefined;
+  if (auth && auth.toLowerCase().startsWith("bearer ")) {
+    token = auth.slice(7).trim();
+  }
+  if (!token) token = getCookie(COOKIE_NAME);
   if (!token) return null;
   return verifySessionToken(token);
 }
