@@ -299,8 +299,8 @@ function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => 
             Set calling status{" "}
             {forcedRnr ? (
               <span className="text-xs text-muted-foreground">(auto-marked RNR after 3 unanswered attempts)</span>
-            ) : !hasConnected ? (
-              <span className="text-xs text-muted-foreground">(needs ≥1 connected attempt)</span>
+            ) : statusVal === "connected" && !hasConnected ? (
+              <span className="text-xs text-muted-foreground">(Connected status needs ≥1 connected attempt)</span>
             ) : null}
           </h3>
           {forcedRnr ? (
