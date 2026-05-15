@@ -1,9 +1,9 @@
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useMemo } from "react";
 import { getMe } from "@/lib/me.functions";
-import { listMyLeads } from "@/lib/leads.functions";
+import { listMyLeads, getLead } from "@/lib/leads.functions";
 import { AppShell } from "@/components/AppShell";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -54,12 +54,22 @@ type Lead = {
 
 function Dashboard() {
   const { user } = Route.useLoaderData();
+  const qc = useQueryClient();
   const fetchLeads = useServerFn(listMyLeads);
+  const fetchLead = useServerFn(getLead);
   const leadsQ = useQuery({
     queryKey: ["my-leads"],
     queryFn: () => fetchLeads(),
     staleTime: 30_000,
   });
+
+  function prefetchLead(id: string) {
+    qc.prefetchQuery({
+      queryKey: ["lead", id],
+      queryFn: () => fetchLead({ data: { id } }),
+      staleTime: 15_000,
+    });
+  }
 
   const { grouped, pendingCount, totalCount, pendingByStage } = useMemo(() => {
     const leads = (leadsQ.data?.leads ?? []) as Lead[];
@@ -160,7 +170,11 @@ function Dashboard() {
                     </thead>
                     <tbody>
                       {leads.map((l) => (
-                        <tr key={l.id} className="border-t hover:bg-muted/30">
+                        <tr
+                          key={l.id}
+                          className="border-t hover:bg-muted/30"
+                          onMouseEnter={() => prefetchLead(l.id)}
+                        >
                           <td className="px-4 py-2 text-muted-foreground tabular-nums">
                             {l.priority}
                           </td>
@@ -178,6 +192,7 @@ function Dashboard() {
                             <Link
                               to="/leads/$id"
                               params={{ id: l.id }}
+                              onFocus={() => prefetchLead(l.id)}
                               className="text-xs font-medium text-primary hover:underline"
                             >
                               Open →
