@@ -15,6 +15,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as LeadsIdRouteImport } from './routes/leads.$id'
 import { Route as ApiAuthLoginRouteImport } from './routes/api/auth/login'
 import { Route as ApiPublicHooksSyncExpertsRouteImport } from './routes/api/public/hooks/sync-experts'
+import { Route as ApiPublicHooksBootstrapCredentialsRouteImport } from './routes/api/public/hooks/bootstrap-credentials'
 
 const SyncRoute = SyncRouteImport.update({
   id: '/sync',
@@ -47,6 +48,12 @@ const ApiPublicHooksSyncExpertsRoute =
     path: '/api/public/hooks/sync-experts',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicHooksBootstrapCredentialsRoute =
+  ApiPublicHooksBootstrapCredentialsRouteImport.update({
+    id: '/api/public/hooks/bootstrap-credentials',
+    path: '/api/public/hooks/bootstrap-credentials',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -54,6 +61,7 @@ export interface FileRoutesByFullPath {
   '/sync': typeof SyncRoute
   '/leads/$id': typeof LeadsIdRoute
   '/api/auth/login': typeof ApiAuthLoginRoute
+  '/api/public/hooks/bootstrap-credentials': typeof ApiPublicHooksBootstrapCredentialsRoute
   '/api/public/hooks/sync-experts': typeof ApiPublicHooksSyncExpertsRoute
 }
 export interface FileRoutesByTo {
@@ -62,6 +70,7 @@ export interface FileRoutesByTo {
   '/sync': typeof SyncRoute
   '/leads/$id': typeof LeadsIdRoute
   '/api/auth/login': typeof ApiAuthLoginRoute
+  '/api/public/hooks/bootstrap-credentials': typeof ApiPublicHooksBootstrapCredentialsRoute
   '/api/public/hooks/sync-experts': typeof ApiPublicHooksSyncExpertsRoute
 }
 export interface FileRoutesById {
@@ -71,6 +80,7 @@ export interface FileRoutesById {
   '/sync': typeof SyncRoute
   '/leads/$id': typeof LeadsIdRoute
   '/api/auth/login': typeof ApiAuthLoginRoute
+  '/api/public/hooks/bootstrap-credentials': typeof ApiPublicHooksBootstrapCredentialsRoute
   '/api/public/hooks/sync-experts': typeof ApiPublicHooksSyncExpertsRoute
 }
 export interface FileRouteTypes {
@@ -81,6 +91,7 @@ export interface FileRouteTypes {
     | '/sync'
     | '/leads/$id'
     | '/api/auth/login'
+    | '/api/public/hooks/bootstrap-credentials'
     | '/api/public/hooks/sync-experts'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -89,6 +100,7 @@ export interface FileRouteTypes {
     | '/sync'
     | '/leads/$id'
     | '/api/auth/login'
+    | '/api/public/hooks/bootstrap-credentials'
     | '/api/public/hooks/sync-experts'
   id:
     | '__root__'
@@ -97,6 +109,7 @@ export interface FileRouteTypes {
     | '/sync'
     | '/leads/$id'
     | '/api/auth/login'
+    | '/api/public/hooks/bootstrap-credentials'
     | '/api/public/hooks/sync-experts'
   fileRoutesById: FileRoutesById
 }
@@ -106,6 +119,7 @@ export interface RootRouteChildren {
   SyncRoute: typeof SyncRoute
   LeadsIdRoute: typeof LeadsIdRoute
   ApiAuthLoginRoute: typeof ApiAuthLoginRoute
+  ApiPublicHooksBootstrapCredentialsRoute: typeof ApiPublicHooksBootstrapCredentialsRoute
   ApiPublicHooksSyncExpertsRoute: typeof ApiPublicHooksSyncExpertsRoute
 }
 
@@ -153,6 +167,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicHooksSyncExpertsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/hooks/bootstrap-credentials': {
+      id: '/api/public/hooks/bootstrap-credentials'
+      path: '/api/public/hooks/bootstrap-credentials'
+      fullPath: '/api/public/hooks/bootstrap-credentials'
+      preLoaderRoute: typeof ApiPublicHooksBootstrapCredentialsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -162,8 +183,20 @@ const rootRouteChildren: RootRouteChildren = {
   SyncRoute: SyncRoute,
   LeadsIdRoute: LeadsIdRoute,
   ApiAuthLoginRoute: ApiAuthLoginRoute,
+  ApiPublicHooksBootstrapCredentialsRoute:
+    ApiPublicHooksBootstrapCredentialsRoute,
   ApiPublicHooksSyncExpertsRoute: ApiPublicHooksSyncExpertsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
