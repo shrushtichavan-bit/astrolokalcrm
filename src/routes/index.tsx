@@ -170,7 +170,11 @@ function Dashboard() {
                     </thead>
                     <tbody>
                       {leads.map((l) => (
-                        <tr key={l.id} className="border-t hover:bg-muted/30">
+                        <tr
+                          key={l.id}
+                          className="border-t hover:bg-muted/30"
+                          onMouseEnter={() => prefetchLead(l.id)}
+                        >
                           <td className="px-4 py-2 text-muted-foreground tabular-nums">
                             {l.priority}
                           </td>
@@ -188,6 +192,7 @@ function Dashboard() {
                             <Link
                               to="/leads/$id"
                               params={{ id: l.id }}
+                              onFocus={() => prefetchLead(l.id)}
                               className="text-xs font-medium text-primary hover:underline"
                             >
                               Open →
