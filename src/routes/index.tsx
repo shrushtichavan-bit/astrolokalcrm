@@ -2,11 +2,11 @@ import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useState } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { getMe } from "@/lib/me.functions";
 import { listMyLeads, getLead } from "@/lib/leads.functions";
 import { AppShell } from "@/components/AppShell";
 import { StatusPill, type StatusKind } from "@/components/StatusPill";
-import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/")({
   beforeLoad: async () => {
@@ -18,15 +18,15 @@ export const Route = createFileRoute("/")({
   component: Dashboard,
 });
 
-const STAGE_LABELS: Record<string, { label: string; icon: string }> = {
-  calling_pending_1: { label: "Attempt 1 Pending", icon: "📞" },
-  calling_pending_2: { label: "Attempt 2 Pending", icon: "📞" },
-  calling_pending_3: { label: "Attempt 3 Pending", icon: "📞" },
-  round_1_pending:   { label: "Round 1 Pending",   icon: "🎙️" },
-  round_2_pending:   { label: "Round 2 Pending",   icon: "🎙️" },
-  round_3_pending:   { label: "Round 3 Pending",   icon: "🎙️" },
-  round_4_pending:   { label: "Round 4 Pending",   icon: "🎙️" },
-  profile_creation_pending: { label: "Expert Profile Creation Pending", icon: "👤" },
+const STAGE_LABELS: Record<string, string> = {
+  calling_pending_1: "Attempt 1",
+  calling_pending_2: "Attempt 2",
+  calling_pending_3: "Attempt 3",
+  round_1_pending:   "Round 1",
+  round_2_pending:   "Round 2",
+  round_3_pending:   "Round 3",
+  round_4_pending:   "Round 4",
+  profile_creation_pending: "Expert Profile Creation",
 };
 
 function formatContact(c: string): string {
@@ -41,13 +41,6 @@ function formatDate(d: string | null): string {
   const dt = new Date(d);
   if (Number.isNaN(dt.getTime())) return d;
   return dt.toLocaleDateString(undefined, { day: "numeric", month: "short" });
-}
-
-function greet(): string {
-  const h = new Date().getHours();
-  if (h < 12) return "Good morning";
-  if (h < 17) return "Good afternoon";
-  return "Good evening";
 }
 
 function statusKindFromLabel(label: string): StatusKind {
@@ -72,7 +65,8 @@ function Dashboard() {
   const leadsQ = useQuery({
     queryKey: ["my-leads"],
     queryFn: () => fetchLeads(),
-    staleTime: 30_000,
+    staleTime: 60_000,
+    gcTime: 5 * 60_000,
     placeholderData: (prev) => prev,
   });
   const [doneOpen, setDoneOpen] = useState(false);
@@ -86,7 +80,7 @@ function Dashboard() {
     qc.prefetchQuery({
       queryKey: ["lead", id],
       queryFn: () => fetchLead({ data: { id } }),
-      staleTime: 15_000,
+      staleTime: 30_000,
     });
   }
 
@@ -141,90 +135,48 @@ function Dashboard() {
 
   return (
     <AppShell user={user}>
-      <div className="space-y-8">
+      <div className="space-y-10">
         {/* Greeting */}
         <section>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {greet()}, {firstName} <span aria-hidden>👋</span>
+          <h1 className="text-[28px] font-bold tracking-tight text-[#1A1A1A]">
+            Hi, {firstName}.
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {leadsQ.isLoading ? (
-              "Loading your leads…"
-            ) : totalPending === 0 ? (
-              "You're all caught up. Nothing waiting for you right now."
-            ) : (
-              <>
-                You have{" "}
-                <span className="font-semibold text-[#F45722]">{totalPending}</span>{" "}
-                {totalPending === 1 ? "thing" : "things"} waiting for you today.
-              </>
-            )}
+          <p className="mt-1 text-[15px] text-[#6B6B6B]">
+            {leadsQ.isLoading
+              ? "Loading."
+              : totalPending === 0
+              ? "All caught up."
+              : `${totalPending} ${totalPending === 1 ? "lead needs" : "leads need"} your attention.`}
           </p>
         </section>
 
-        {/* Summary cards */}
-        {leadsQ.isLoading ? (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3">
-            {[0, 1, 2].map((i) => (
-              <div key={i} className="h-[110px] animate-pulse rounded-2xl border border-border bg-white" />
-            ))}
-          </div>
-        ) : summaryCards.length > 0 ? (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3">
-            {summaryCards.map((row) => (
-              <div
-                key={row.label}
-                className={`rounded-2xl border border-border bg-white p-5 shadow-[0_2px_8px_rgba(244,87,34,0.06)] ${
-                  row.pending > 0 ? "border-l-4 border-l-[#F45722]" : ""
-                }`}
-              >
-                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  {row.label}
-                </div>
-                <div className="mt-3 flex items-baseline gap-4">
-                  <div>
-                    <div className="text-2xl font-bold text-[#F45722] tabular-nums">{row.pending}</div>
-                    <div className="text-xs text-muted-foreground">pending</div>
-                  </div>
-                  <div>
-                    <div className="text-2xl font-bold text-[#22A55B] tabular-nums">{row.done}</div>
-                    <div className="text-xs text-muted-foreground">done</div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : null}
-
         {/* Date filter */}
-        <div className="flex flex-wrap items-center gap-3 text-sm">
-          <span className="text-muted-foreground">Show leads from</span>
+        <div className="flex flex-wrap items-center gap-2 text-[13px]">
           <input
             type="date"
             value={fromDate}
             onChange={(e) => setFromDate(e.target.value)}
-            className="rounded-lg border border-border bg-white px-3 py-1.5 text-sm focus:border-[#F45722] focus:outline-none focus:ring-2 focus:ring-[#F45722]/20"
+            className="h-10 rounded-[8px] border border-[#EBEBEB] bg-white px-3 text-[14px] text-[#1A1A1A] transition-all duration-150 focus:border-[#F45722] focus:outline-none focus:ring-[3px] focus:ring-[#F45722]/10"
           />
-          <span className="text-muted-foreground">to</span>
+          <span className="text-[#6B6B6B]">to</span>
           <input
             type="date"
             value={toDate}
             onChange={(e) => setToDate(e.target.value)}
-            className="rounded-lg border border-border bg-white px-3 py-1.5 text-sm focus:border-[#F45722] focus:outline-none focus:ring-2 focus:ring-[#F45722]/20"
+            className="h-10 rounded-[8px] border border-[#EBEBEB] bg-white px-3 text-[14px] text-[#1A1A1A] transition-all duration-150 focus:border-[#F45722] focus:outline-none focus:ring-[3px] focus:ring-[#F45722]/10"
           />
-          <Button
-            size="sm"
-            className="bg-[#F45722] font-semibold hover:bg-[#D94A1E]"
+          <button
             onClick={() => {
               setAppliedFrom(fromDate);
               setAppliedTo(toDate);
             }}
+            className="ml-1 text-[14px] font-medium text-[#F45722] transition-colors duration-150 hover:text-[#D94A1E]"
           >
             Apply
-          </Button>
+          </button>
           {(appliedFrom || appliedTo) && (
             <button
-              className="text-sm text-muted-foreground underline-offset-2 hover:underline"
+              className="ml-1 text-[14px] text-[#6B6B6B] transition-colors duration-150 hover:text-[#1A1A1A]"
               onClick={() => {
                 setFromDate("");
                 setToDate("");
@@ -237,97 +189,126 @@ function Dashboard() {
           )}
         </div>
 
+        {/* Summary stat cards */}
+        {leadsQ.isLoading ? (
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="h-[96px] animate-pulse rounded-[10px] bg-[#F3F4F6]" />
+            ))}
+          </div>
+        ) : summaryCards.length > 0 ? (
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            {summaryCards.map((row) => (
+              <div
+                key={row.label}
+                className="rounded-[10px] border border-[#EBEBEB] bg-white px-5 py-4"
+              >
+                <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#6B6B6B]">
+                  {row.label}
+                </div>
+                <div className="mt-2 flex items-baseline gap-5">
+                  <div>
+                    <div className="text-[28px] font-bold tabular-nums leading-none text-[#F45722]">
+                      {row.pending}
+                    </div>
+                    <div className="mt-1 text-[12px] text-[#6B6B6B]">Pending</div>
+                  </div>
+                  <div>
+                    <div className="text-[28px] font-bold tabular-nums leading-none text-[#22A55B]">
+                      {row.done}
+                    </div>
+                    <div className="mt-1 text-[12px] text-[#6B6B6B]">Done</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
         {/* Errors */}
         {leadsQ.error && (
-          <div className="rounded-xl border border-[#FECACA] bg-[#FEE2E2] p-3 text-sm text-[#7F1D1D]">
+          <div className="rounded-[8px] border border-[#EBEBEB] bg-white px-4 py-3 text-[14px] text-[#E53935]">
             {(leadsQ.error as Error).message}
           </div>
         )}
 
         {/* Empty state */}
         {!leadsQ.isLoading && bucketOrder.length === 0 && done.length === 0 && (
-          <div className="rounded-2xl border border-border bg-white p-10 text-center">
-            <div className="text-3xl">🎉</div>
-            <div className="mt-2 text-base font-semibold">All caught up!</div>
-            <div className="text-sm text-muted-foreground">No leads waiting here right now.</div>
+          <div className="rounded-[10px] border border-[#EBEBEB] bg-white p-12 text-center">
+            <p className="text-[15px] text-[#6B6B6B]">No leads here.</p>
+            <p className="mt-1 text-[13px] text-[#ADADAD]">
+              When new leads are assigned to you, they'll show up in this view.
+            </p>
           </div>
         )}
 
-        {/* Pending section */}
+        {/* Pending */}
         {bucketOrder.length > 0 && (
-          <section className="space-y-4">
-            <div className="flex items-baseline justify-between">
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Pending
-              </h2>
-              <span className="text-sm text-muted-foreground">
-                {totalPending} {totalPending === 1 ? "lead needs" : "leads need"} your attention
-              </span>
-            </div>
-
+          <section className="space-y-3">
+            <h2 className="text-[13px] font-semibold uppercase tracking-[0.08em] text-[#6B6B6B]">
+              Pending
+            </h2>
             {bucketOrder.map((stage) => {
               const leads = grouped[stage];
-              const meta = STAGE_LABELS[stage] ?? { label: stage, icon: "📌" };
+              const label = STAGE_LABELS[stage] ?? stage;
               const open = !collapsed[stage];
               return (
                 <div
                   key={stage}
-                  className="overflow-hidden rounded-2xl border border-border bg-white shadow-[0_2px_8px_rgba(244,87,34,0.06)] border-l-4 border-l-[#F45722]"
+                  className="overflow-hidden rounded-[10px] border border-[#EBEBEB] bg-white"
                 >
                   <button
                     type="button"
                     onClick={() => setCollapsed((s) => ({ ...s, [stage]: !!open }))}
-                    className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left hover:bg-[#FEEEE9]/40"
+                    className="flex w-full items-center justify-between gap-3 px-6 py-4 text-left transition-colors duration-150 hover:bg-[#F9F9F9]"
                   >
                     <div className="flex items-center gap-3">
-                      <span className="text-lg" aria-hidden>{meta.icon}</span>
-                      <span className="text-base font-semibold">{meta.label}</span>
-                      <span className="rounded-full bg-[#FEEEE9] px-2.5 py-0.5 text-xs font-semibold text-[#F45722]">
-                        Action needed
+                      {open ? (
+                        <ChevronDown size={16} className="text-[#6B6B6B]" />
+                      ) : (
+                        <ChevronRight size={16} className="text-[#6B6B6B]" />
+                      )}
+                      <span className="text-[15px] font-semibold text-[#1A1A1A]">{label}</span>
+                      <span className="rounded-[6px] bg-[#FEEEE9] px-2 py-[2px] text-[12px] font-medium text-[#F45722]">
+                        {leads.length}
                       </span>
-                    </div>
-                    <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                      <span>{leads.length} {leads.length === 1 ? "lead" : "leads"}</span>
-                      <span aria-hidden>{open ? "▾" : "▸"}</span>
                     </div>
                   </button>
 
                   {open && (
-                    <div className="overflow-x-auto border-t border-border">
-                      <table className="w-full text-sm">
-                        <thead className="bg-[#FEEEE9]/40 text-xs uppercase tracking-wide text-muted-foreground">
-                          <tr>
-                            <th className="w-10 px-5 py-3 text-left">#</th>
-                            <th className="px-5 py-3 text-left">Name</th>
-                            <th className="px-5 py-3 text-left">Contact</th>
-                            <th className="hidden px-5 py-3 text-left md:table-cell">Source</th>
-                            <th className="hidden px-5 py-3 text-left md:table-cell">Date</th>
-                            <th className="px-5 py-3"></th>
+                    <div className="border-t border-[#EBEBEB]">
+                      <table className="w-full text-[14px]">
+                        <thead>
+                          <tr className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#6B6B6B]">
+                            <th className="px-6 py-2.5 text-left font-semibold">Name</th>
+                            <th className="px-6 py-2.5 text-left font-semibold">Contact</th>
+                            <th className="hidden px-6 py-2.5 text-left font-semibold md:table-cell">Source</th>
+                            <th className="hidden px-6 py-2.5 text-left font-semibold md:table-cell">Date</th>
+                            <th className="px-6 py-2.5"></th>
                           </tr>
                         </thead>
                         <tbody>
-                          {leads.map((l, i) => (
+                          {leads.map((l) => (
                             <tr
                               key={l.id}
-                              className="border-t border-border hover:bg-[#FEEEE9]/30"
+                              className="border-t border-[#EBEBEB] transition-colors duration-150 hover:bg-[#F9F9F9]"
                               onMouseEnter={() => prefetchLead(l.id)}
                             >
-                              <td className="px-5 py-3 text-muted-foreground tabular-nums">{i + 1}</td>
-                              <td className="px-5 py-3">
-                                <div className="font-medium text-foreground">{l.name}</div>
-                                <div className="font-mono text-[11px] text-muted-foreground">{l.lead_id}</div>
+                              <td className="px-6 py-3">
+                                <div className="font-semibold text-[#1A1A1A]">{l.name}</div>
+                                <div className="font-mono text-[11px] text-[#6B6B6B]">{l.lead_id}</div>
                               </td>
-                              <td className="px-5 py-3 tabular-nums">{formatContact(l.contact)}</td>
-                              <td className="hidden px-5 py-3 text-muted-foreground md:table-cell">{l.source ?? "—"}</td>
-                              <td className="hidden px-5 py-3 text-muted-foreground md:table-cell">{formatDate(l.lead_date)}</td>
-                              <td className="px-5 py-3 text-right">
+                              <td className="px-6 py-3 tabular-nums text-[#1A1A1A]">{formatContact(l.contact)}</td>
+                              <td className="hidden px-6 py-3 text-[#6B6B6B] md:table-cell">{l.source ?? "—"}</td>
+                              <td className="hidden px-6 py-3 text-[#6B6B6B] md:table-cell">{formatDate(l.lead_date)}</td>
+                              <td className="px-6 py-3 text-right">
                                 <Link
                                   to="/leads/$id"
                                   params={{ id: l.id }}
                                   onFocus={() => prefetchLead(l.id)}
-                                  className="text-sm font-semibold text-[#F45722] hover:underline"
+                                  className="text-[14px] font-medium text-[#F45722] transition-colors duration-150 hover:text-[#D94A1E]"
                                 >
-                                  Open →
+                                  Open
                                 </Link>
                               </td>
                             </tr>
@@ -342,35 +323,47 @@ function Dashboard() {
           </section>
         )}
 
-        {/* Done section */}
+        {/* Done */}
         {done.length > 0 && (
-          <section>
-            <div className="overflow-hidden rounded-2xl border border-border bg-white">
+          <section className="space-y-3">
+            <h2 className="text-[13px] font-semibold uppercase tracking-[0.08em] text-[#6B6B6B]">
+              Done
+            </h2>
+            <div className="overflow-hidden rounded-[10px] border border-[#EBEBEB] bg-white">
               <button
                 type="button"
                 onClick={() => setDoneOpen((v) => !v)}
-                className="flex w-full items-center justify-between px-5 py-4 text-left hover:bg-[#FEEEE9]/40"
+                className="flex w-full items-center justify-between px-6 py-4 text-left transition-colors duration-150 hover:bg-[#F9F9F9]"
               >
                 <div className="flex items-center gap-3">
-                  <span className="text-base font-semibold">Done</span>
-                  <span className="rounded-full bg-[#DCFCE7] px-2.5 py-0.5 text-xs font-semibold text-[#166534]">
-                    {done.length} {done.length === 1 ? "lead" : "leads"}
+                  {doneOpen ? (
+                    <ChevronDown size={16} className="text-[#6B6B6B]" />
+                  ) : (
+                    <ChevronRight size={16} className="text-[#6B6B6B]" />
+                  )}
+                  <span className="text-[15px] font-semibold text-[#1A1A1A]">Completed</span>
+                  <span className="rounded-[6px] bg-[#F0FDF4] px-2 py-[2px] text-[12px] font-medium text-[#166534]">
+                    {done.length}
                   </span>
                 </div>
-                <span className="text-sm text-muted-foreground">{doneOpen ? "▾ Hide" : "▸ Show"}</span>
               </button>
               {doneOpen && (
-                <ul className="divide-y divide-border border-t border-border">
-                  {done.map((d) => (
-                    <li key={d.id} className="flex items-center justify-between gap-3 bg-[#FEEEE9]/30 px-5 py-3">
+                <ul className="border-t border-[#EBEBEB]">
+                  {done.map((d, i) => (
+                    <li
+                      key={d.id}
+                      className={`flex items-center justify-between gap-3 px-6 py-3 transition-colors duration-150 hover:bg-[#F9F9F9] ${
+                        i > 0 ? "border-t border-[#EBEBEB]" : ""
+                      }`}
+                    >
                       <div className="flex min-w-0 items-center gap-3">
                         <StatusPill kind={statusKindFromLabel(d.label)} label={d.label} />
-                        <span className="font-medium">{d.name}</span>
+                        <span className="text-[14px] font-medium text-[#1A1A1A]">{d.name}</span>
                       </div>
                       <Link
                         to="/leads/$id"
                         params={{ id: d.id }}
-                        className="text-sm font-semibold text-[#F45722] hover:underline"
+                        className="text-[14px] font-medium text-[#F45722] transition-colors duration-150 hover:text-[#D94A1E]"
                       >
                         View
                       </Link>

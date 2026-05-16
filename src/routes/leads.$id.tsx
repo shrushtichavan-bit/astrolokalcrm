@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
+import { ChevronLeft, Check } from "lucide-react";
 import { getMe } from "@/lib/me.functions";
 import {
   getLead,
@@ -15,9 +16,6 @@ import {
 } from "@/lib/leads.functions";
 import { AppShell } from "@/components/AppShell";
 import { StatusPill, type StatusKind } from "@/components/StatusPill";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export const Route = createFileRoute("/leads/$id")({
@@ -46,7 +44,7 @@ function fmtDateTime(iso: string): string {
 }
 
 function stageToPill(stage: string): { kind: StatusKind; label: string } {
-  if (stage === "calling_pending") return { kind: "pending", label: "Calling in progress" };
+  if (stage === "calling_pending") return { kind: "pending", label: "Calling pending" };
   if (stage === "profile_creation_pending") return { kind: "pending", label: "Profile creation pending" };
   const m = stage.match(/^round_(\d+)_pending$/);
   if (m) return { kind: "pending", label: `Round ${m[1]} pending` };
@@ -57,6 +55,50 @@ function stageToPill(stage: string): { kind: StatusKind; label: string } {
   return { kind: "neutral", label: stage };
 }
 
+/* ------------ shared atoms ------------ */
+
+const card = "rounded-[10px] border border-[#EBEBEB] bg-white";
+const cardPad = "p-6";
+
+function PrimaryButton({
+  children,
+  disabled,
+  onClick,
+  type = "button",
+  className = "",
+}: {
+  children: React.ReactNode;
+  disabled?: boolean;
+  onClick?: () => void;
+  type?: "button" | "submit";
+  className?: string;
+}) {
+  return (
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={disabled}
+      className={`h-10 rounded-[8px] bg-[#F45722] px-5 text-[15px] font-semibold text-white transition-colors duration-150 hover:bg-[#D94A1E] disabled:cursor-not-allowed disabled:opacity-40 ${className}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="text-[13px] font-semibold uppercase tracking-[0.08em] text-[#6B6B6B]">
+      {children}
+    </div>
+  );
+}
+
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return <label className="block text-[13px] font-medium text-[#1A1A1A]">{children}</label>;
+}
+
+/* ------------ page ------------ */
+
 function LeadDetail() {
   const { user } = Route.useLoaderData();
   const { id } = Route.useParams();
@@ -65,7 +107,7 @@ function LeadDetail() {
   const leadQ = useQuery({
     queryKey: ["lead", id],
     queryFn: () => fetchLead({ data: { id } }),
-    staleTime: 15_000,
+    staleTime: 30_000,
     retry: false,
   });
 
@@ -80,34 +122,39 @@ function LeadDetail() {
   return (
     <AppShell user={user}>
       <div className="mb-6">
-        <Link to="/" className="text-sm text-muted-foreground hover:text-foreground hover:underline">
-          ← Back to Dashboard
+        <Link
+          to="/"
+          className="inline-flex items-center gap-1 text-[14px] text-[#6B6B6B] transition-colors duration-150 hover:text-[#1A1A1A]"
+        >
+          <ChevronLeft size={16} />
+          Dashboard
         </Link>
       </div>
 
       {leadQ.isLoading && (
         <div className="space-y-3">
-          <div className="h-24 animate-pulse rounded-2xl border border-border bg-white" />
-          <div className="h-64 animate-pulse rounded-2xl border border-border bg-white" />
+          <div className="h-24 animate-pulse rounded-[10px] bg-[#F3F4F6]" />
+          <div className="h-64 animate-pulse rounded-[10px] bg-[#F3F4F6]" />
         </div>
       )}
 
       {errMsg && (
-        <div className="rounded-2xl border border-border bg-white p-6">
-          <div className="text-base font-semibold">
+        <div className={`${card} ${cardPad}`}>
+          <div className="text-[16px] font-semibold text-[#1A1A1A]">
             {isForbidden ? "This lead is no longer assigned to you" : "Couldn't load this lead"}
           </div>
-          <p className="mt-2 text-sm text-muted-foreground">
+          <p className="mt-2 text-[14px] text-[#6B6B6B]">
             {isForbidden
-              ? "It may have been moved to another stage or owner. Head back to your dashboard to see your current leads."
+              ? "It may have been moved to another stage or owner."
               : errMsg}
           </p>
           <Link
             to="/"
             onClick={() => qc.invalidateQueries({ queryKey: ["my-leads"] })}
-            className="mt-4 inline-block text-sm font-semibold text-[#F45722] hover:underline"
+            className="mt-4 inline-flex items-center gap-1 text-[14px] font-medium text-[#F45722] transition-colors duration-150 hover:text-[#D94A1E]"
           >
-            ← Back to dashboard
+            <ChevronLeft size={16} />
+            Back to dashboard
           </Link>
         </div>
       )}
@@ -121,23 +168,23 @@ function LeadHeader({ data }: { data: LeadData }) {
   const { lead } = data;
   const pill = stageToPill(lead.current_stage);
   return (
-    <div className="rounded-2xl border border-border bg-white p-6 shadow-[0_2px_8px_rgba(244,87,34,0.06)]">
-      <h1 className="text-2xl font-semibold tracking-tight">{lead.name}</h1>
-      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
-        <span className="tabular-nums">📞 {formatContact(lead.contact)}</span>
-        <span>·</span>
-        <span>{lead.source ?? "Direct"}</span>
-        {lead.lead_date && (
-          <>
+    <div className={`${card} ${cardPad}`}>
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-[24px] font-bold tracking-tight text-[#1A1A1A]">{lead.name}</h1>
+          <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-[#6B6B6B]">
+            <span className="tabular-nums">{formatContact(lead.contact)}</span>
             <span>·</span>
-            <span>Lead date: {fmtDateTime(lead.lead_date)}</span>
-          </>
-        )}
-      </div>
-      <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
-        <span className="text-muted-foreground">Current stage:</span>
+            <span>{lead.source ?? "Direct"}</span>
+            {lead.lead_date && (
+              <>
+                <span>·</span>
+                <span>Lead date {fmtDateTime(lead.lead_date)}</span>
+              </>
+            )}
+          </div>
+        </div>
         <StatusPill kind={pill.kind} label={pill.label} />
-        <span className="text-muted-foreground">· Priority {lead.priority}</span>
       </div>
     </div>
   );
@@ -145,7 +192,7 @@ function LeadHeader({ data }: { data: LeadData }) {
 
 function LeadView({ data, userEmail, onChanged }: { data: LeadData; userEmail: string; onChanged: () => void }) {
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <LeadHeader data={data} />
       <CompletedTimeline data={data} />
       <ActionsPanel data={data} userEmail={userEmail} onChanged={onChanged} />
@@ -176,9 +223,9 @@ function CompletedTimeline({ data }: { data: LeadData }) {
       pill: (o as StatusKind),
       pillLabel: OUTCOME_LABELS[o] ?? o,
       details: (
-        <div className="space-y-1 text-sm text-muted-foreground">
-          <div>Outcome: <span className="text-foreground font-medium">{OUTCOME_LABELS[o] ?? o}</span></div>
-          {(a as { remarks?: string | null }).remarks && <div>Notes: “{(a as { remarks?: string | null }).remarks}”</div>}
+        <div className="space-y-1 text-[14px] text-[#6B6B6B]">
+          <div>Outcome: <span className="font-medium text-[#1A1A1A]">{OUTCOME_LABELS[o] ?? o}</span></div>
+          {(a as { remarks?: string | null }).remarks && <div>Notes: {(a as { remarks?: string | null }).remarks}</div>}
         </div>
       ),
     });
@@ -187,15 +234,15 @@ function CompletedTimeline({ data }: { data: LeadData }) {
     const kind: StatusKind = r.passed === true ? "passed" : r.passed === false ? "failed" : "pending";
     items.push({
       id: `r-${r.id}`,
-      title: `Round ${r.round_number} Interview`,
+      title: `Round ${r.round_number}`,
       subtitle: r.conducted_by ? `by ${r.conducted_by}` : "",
       pill: kind,
       pillLabel: r.passed === true ? "Passed" : r.passed === false ? "Failed" : "Submitted",
       details: (
-        <div className="space-y-1 text-sm text-muted-foreground">
-          <div>Conducted by: <span className="text-foreground font-medium">{r.conducted_by}</span></div>
-          {r.total_score != null && <div>Score: <span className="text-foreground font-medium">{r.total_score}</span></div>}
-          {r.remarks && <div>Notes: “{r.remarks}”</div>}
+        <div className="space-y-1 text-[14px] text-[#6B6B6B]">
+          <div>Conducted by: <span className="font-medium text-[#1A1A1A]">{r.conducted_by}</span></div>
+          {r.total_score != null && <div>Score: <span className="font-medium text-[#1A1A1A]">{r.total_score}</span></div>}
+          {r.remarks && <div>Notes: {r.remarks}</div>}
         </div>
       ),
     });
@@ -208,8 +255,8 @@ function CompletedTimeline({ data }: { data: LeadData }) {
       pill: profile.is_active ? "active" : "inactive",
       pillLabel: profile.is_active ? "Active" : "Inactive",
       details: (
-        <div className="space-y-1 text-sm text-muted-foreground">
-          <div>Expert ID: <span className="font-mono text-foreground">{profile.expert_id}</span></div>
+        <div className="space-y-1 text-[14px] text-[#6B6B6B]">
+          <div>Expert ID: <span className="font-mono text-[#1A1A1A]">{profile.expert_id}</span></div>
         </div>
       ),
     });
@@ -218,27 +265,28 @@ function CompletedTimeline({ data }: { data: LeadData }) {
   if (items.length === 0) return null;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
+      <SectionLabel>Timeline</SectionLabel>
       {items.map((it) => {
         const open = openId === it.id;
         return (
           <div
             key={it.id}
-            className="overflow-hidden rounded-2xl border border-border bg-white"
+            className="overflow-hidden rounded-[10px] border border-[#EBEBEB] bg-white"
           >
             <button
               type="button"
               onClick={() => setOpenId(open ? null : it.id)}
-              className="flex w-full items-center justify-between gap-3 px-5 py-3 text-left hover:bg-[#FEEEE9]/40"
+              className="flex w-full items-center justify-between gap-3 px-5 py-3 text-left transition-colors duration-150 hover:bg-[#F9F9F9]"
             >
               <div className="flex items-center gap-3">
-                <span aria-hidden>✅</span>
-                <span className="font-medium">{it.title}</span>
+                <Check size={16} className="text-[#22A55B]" />
+                <span className="text-[14px] font-medium text-[#1A1A1A]">{it.title}</span>
                 <StatusPill kind={it.pill} label={it.pillLabel} />
               </div>
-              <span className="text-xs text-muted-foreground">{it.subtitle}</span>
+              <span className="text-[12px] text-[#6B6B6B]">{it.subtitle}</span>
             </button>
-            {open && <div className="border-t border-border bg-[#FEEEE9]/20 px-5 py-3">{it.details}</div>}
+            {open && <div className="border-t border-[#EBEBEB] px-5 py-3">{it.details}</div>}
           </div>
         );
       })}
@@ -256,23 +304,17 @@ function ActionsPanel({ data, userEmail, onChanged }: { data: LeadData; userEmai
       : stage === "profile_creation_pending"
       ? "Expert Profile Creation"
       : stage.startsWith("round_") && stage.endsWith("_pending")
-      ? `Round ${stage.replace(/[^0-9]/g, "")} Interview`
+      ? `Round ${stage.replace(/[^0-9]/g, "")}`
       : stage;
     return (
-      <div className="rounded-2xl border border-border bg-[#FEEEE9] p-8 text-center">
-        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[#DCFCE7] text-3xl">
-          ✅
+      <div className={`${card} ${cardPad}`}>
+        <div className="text-[16px] font-semibold text-[#1A1A1A]">
+          Passed to {data.lead.current_owner_email}
         </div>
-        <h2 className="mt-4 text-xl font-semibold">Lead passed on</h2>
-        <p className="mt-2 text-sm text-foreground">
-          You passed this lead to <strong>{data.lead.current_owner_email}</strong>
-          <br />
-          for <strong>{forLabel}</strong>.
+        <p className="mt-2 text-[14px] text-[#6B6B6B]">
+          For {forLabel} · {fmtDateTime(data.lead.updated_at)}
         </p>
-        <p className="mt-2 text-xs text-muted-foreground">
-          Passed on: {fmtDateTime(data.lead.updated_at)}
-        </p>
-        <p className="mt-4 text-sm text-muted-foreground">
+        <p className="mt-4 text-[14px] text-[#6B6B6B]">
           Your work on this lead is complete.
         </p>
       </div>
@@ -290,7 +332,7 @@ function ActionsPanel({ data, userEmail, onChanged }: { data: LeadData; userEmai
     return <ProfileActions data={data} onChanged={onChanged} />;
   }
   return (
-    <div className="rounded-2xl border border-border bg-white p-6 text-sm text-muted-foreground">
+    <div className={`${card} ${cardPad} text-[14px] text-[#6B6B6B]`}>
       Nothing to do here.
     </div>
   );
@@ -298,12 +340,12 @@ function ActionsPanel({ data, userEmail, onChanged }: { data: LeadData; userEmai
 
 /* ===================== CALLING ===================== */
 
-const CALLING_OPTIONS: Array<{ value: string; icon: string; label: string; desc: string }> = [
-  { value: "connected",     icon: "✅", label: "Connected",     desc: "I spoke to them." },
-  { value: "reconnect",     icon: "🔁", label: "Reconnect",     desc: "They asked to call back later." },
-  { value: "rnr",           icon: "📵", label: "RNR",           desc: "Phone rang but no one answered." },
-  { value: "junk",          icon: "🗑️", label: "Junk",          desc: "Wrong number or fake lead." },
-  { value: "not_interested",icon: "🚫", label: "Not Interested",desc: "They picked up but refused." },
+const CALLING_OPTIONS: Array<{ value: string; label: string; desc: string }> = [
+  { value: "connected",      label: "Connected",      desc: "I spoke to them." },
+  { value: "reconnect",      label: "Reconnect",      desc: "They asked to call back later." },
+  { value: "rnr",            label: "RNR",            desc: "Phone rang but no one answered." },
+  { value: "junk",           label: "Junk",           desc: "Wrong number or fake lead." },
+  { value: "not_interested", label: "Not Interested", desc: "They picked up but refused." },
 ];
 
 function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => void }) {
@@ -313,7 +355,7 @@ function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => 
   const poolQ = useQuery({
     queryKey: ["pool", "round_1"],
     queryFn: () => fetchPool({ data: { stage: "round_1" } }),
-    staleTime: 5 * 60_000,
+    staleTime: 10 * 60_000,
   });
 
   const sorted = [...attempts].sort((a, b) => a.attempt_number - b.attempt_number);
@@ -329,19 +371,19 @@ function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => 
 
   if (nextAttempt == null) {
     return (
-      <div className="rounded-2xl border border-border bg-white p-6 text-sm text-muted-foreground">
-        {terminal ? "Lead is finalised — no more attempts needed." : "All 3 attempts logged. Lead is locked."}
+      <div className={`${card} ${cardPad} text-[14px] text-[#6B6B6B]`}>
+        {terminal ? "Lead is finalised — no more attempts needed." : "All 3 attempts logged."}
       </div>
     );
   }
 
   async function save() {
     if (!outcome) {
-      toast.warning("Please select an outcome before saving.");
+      toast.warning("Select an outcome before saving.");
       return;
     }
     if (outcome === "connected" && !kam) {
-      toast.warning("Please pick a person to take this forward.");
+      toast.warning("Select a person to take this forward.");
       return;
     }
     setBusy(true);
@@ -356,28 +398,26 @@ function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => 
         },
       });
       if (outcome === "connected" && kam) {
-        toast.success(`Lead passed to ${kam} for Round 1`);
+        toast.success(`Lead passed to ${kam}.`);
       } else {
-        toast.success("Attempt saved successfully");
+        toast.success("Attempt saved.");
       }
       setOutcome(null);
       setRemarks("");
       setKam("");
       onChanged();
     } catch (e) {
-      toast.error("Couldn't save attempt", { description: (e as Error).message });
+      toast.error("Something went wrong. Try again.", { description: (e as Error).message });
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <div className="space-y-5">
-      <div className="rounded-2xl border border-border bg-white p-6 shadow-[0_2px_8px_rgba(244,87,34,0.06)]">
-        <div className="flex items-center gap-2 text-lg font-semibold">
-          <span aria-hidden>📞</span> Call Attempt {nextAttempt}
-        </div>
-        <p className="mt-1 text-sm text-muted-foreground">You called this person. What happened?</p>
+    <div className="space-y-4">
+      <div className={`${card} ${cardPad}`}>
+        <div className="text-[16px] font-semibold text-[#1A1A1A]">Attempt {nextAttempt}</div>
+        <p className="mt-1 text-[14px] text-[#6B6B6B]">What happened on the call?</p>
 
         <div className="mt-5 space-y-2">
           {CALLING_OPTIONS.map((opt) => {
@@ -387,66 +427,51 @@ function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => 
                 key={opt.value}
                 type="button"
                 onClick={() => setOutcome(opt.value)}
-                className={`flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left transition-colors ${
+                className={`block w-full rounded-[8px] border px-4 py-3 text-left transition-all duration-150 ${
                   selected
                     ? "border-[#F45722] bg-[#FEEEE9]"
-                    : "border-border bg-white hover:border-[#FDD9CE] hover:bg-[#FEEEE9]/40"
+                    : "border-[#EBEBEB] bg-white hover:border-[#D0D0D0]"
                 }`}
               >
-                <span
-                  className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${
-                    selected ? "border-[#F45722]" : "border-border"
-                  }`}
-                >
-                  {selected && <span className="h-2.5 w-2.5 rounded-full bg-[#F45722]" />}
-                </span>
-                <span className="text-xl leading-none" aria-hidden>{opt.icon}</span>
-                <span>
-                  <span className="block font-semibold text-foreground">{opt.label}</span>
-                  <span className="block text-sm text-muted-foreground">{opt.desc}</span>
-                </span>
+                <div className="text-[15px] font-medium text-[#1A1A1A]">{opt.label}</div>
+                <div className="mt-0.5 text-[13px] text-[#6B6B6B]">{opt.desc}</div>
               </button>
             );
           })}
         </div>
 
         {outcome === "connected" && (
-          <div className="mt-5 space-y-2">
-            <Label>Your notes (optional)</Label>
-            <Textarea
+          <div className="mt-5 space-y-1.5">
+            <FieldLabel>Notes (optional)</FieldLabel>
+            <textarea
               value={remarks}
               onChange={(e) => setRemarks(e.target.value)}
               rows={3}
               placeholder="What did they say?"
+              className="w-full rounded-[8px] border border-[#EBEBEB] bg-white px-3 py-2 text-[15px] text-[#1A1A1A] placeholder:text-[#ADADAD] transition-all duration-150 focus:border-[#F45722] focus:outline-none focus:ring-[3px] focus:ring-[#F45722]/10"
             />
           </div>
         )}
 
         {outcome !== "connected" && (
           <div className="mt-5">
-            <Button
-              onClick={save}
-              disabled={busy || !outcome}
-              className="h-11 w-full bg-[#F45722] text-base font-semibold hover:bg-[#D94A1E]"
-            >
-              {busy ? "Saving…" : "Save Attempt"}
-            </Button>
+            <PrimaryButton onClick={save} disabled={busy || !outcome} className="w-full">
+              {busy ? "Saving" : "Save attempt"}
+            </PrimaryButton>
           </div>
         )}
       </div>
 
       {outcome === "connected" && (
-        <div className="rounded-2xl border border-border bg-white p-6 shadow-[0_2px_8px_rgba(244,87,34,0.06)]">
-          <div className="flex items-center gap-2 text-lg font-semibold">
-            <span aria-hidden>👤</span> Who should take this forward?
-          </div>
-          <p className="mt-1 text-sm text-muted-foreground">
+        <div className={`${card} ${cardPad}`}>
+          <div className="text-[16px] font-semibold text-[#1A1A1A]">Pass the lead to</div>
+          <p className="mt-1 text-[14px] text-[#6B6B6B]">
             Pick a person from your team to conduct Round 1.
           </p>
           <div className="mt-4 space-y-3">
             <Select value={kam} onValueChange={setKam}>
-              <SelectTrigger className="h-11">
-                <SelectValue placeholder="Select a person…" />
+              <SelectTrigger className="h-10 rounded-[8px] border-[#EBEBEB]">
+                <SelectValue placeholder="Select a person" />
               </SelectTrigger>
               <SelectContent>
                 {(poolQ.data?.members ?? []).map((m) => (
@@ -454,13 +479,9 @@ function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => 
                 ))}
               </SelectContent>
             </Select>
-            <Button
-              onClick={save}
-              disabled={busy || !kam}
-              className="h-11 w-full bg-[#F45722] text-base font-semibold hover:bg-[#D94A1E]"
-            >
-              {busy ? "Passing on…" : "Pass to Round 1"}
-            </Button>
+            <PrimaryButton onClick={save} disabled={busy || !kam} className="w-full">
+              {busy ? "Passing" : "Pass to Round 1"}
+            </PrimaryButton>
           </div>
         </div>
       )}
@@ -487,6 +508,7 @@ function RoundActions({ data, round, onChanged }: { data: LeadData; round: numbe
   const poolQ = useQuery({
     queryKey: ["pool", nextStage],
     queryFn: () => fetchPool({ data: { stage: nextStage } }),
+    staleTime: 10 * 60_000,
   });
 
   const [grades, setGrades] = useState<Record<string, number>>({});
@@ -498,11 +520,10 @@ function RoundActions({ data, round, onChanged }: { data: LeadData; round: numbe
   const questions = useMemo(() => startQ.data?.questions ?? [], [startQ.data]);
   const graded = questions.filter((q) => grades[q.question_id] != null).length;
   const allGraded = questions.length > 0 && graded === questions.length;
-  const pct = questions.length > 0 ? Math.round((graded / questions.length) * 100) : 0;
 
   async function submit() {
     if (!allGraded) {
-      toast.warning("Please grade every question before submitting.");
+      toast.warning("Grade every question before submitting.");
       return;
     }
     setBusy(true);
@@ -521,15 +542,15 @@ function RoundActions({ data, round, onChanged }: { data: LeadData; round: numbe
       const r = await submitFn({ data: payload });
       setVerdict({ verdict: r.verdict ?? null, total: r.total_score ?? 0 });
       if (r.verdict === "passed") {
-        toast.success(`Round ${round} passed — total ${r.total_score} points`);
+        toast.success(`Round ${round} passed.`);
       } else if (r.verdict === "failed") {
-        toast.error(`Round ${round} failed — total ${r.total_score} points`);
+        toast.error(`Round ${round} not passed.`);
       } else {
-        toast.success(`Round ${round} saved — ${r.total_score} points`);
+        toast.success(`Round ${round} saved.`);
       }
       onChanged();
     } catch (e) {
-      toast.error("Couldn't submit round", { description: (e as Error).message });
+      toast.error("Something went wrong. Try again.", { description: (e as Error).message });
     } finally {
       setBusy(false);
     }
@@ -540,35 +561,38 @@ function RoundActions({ data, round, onChanged }: { data: LeadData; round: numbe
     const failed = verdict.verdict === "failed";
     if (passed) {
       return (
-        <div className="space-y-5">
-          <div className="rounded-2xl border border-border bg-[#FEEEE9] p-8 text-center">
-            <div className="text-3xl">🎉</div>
-            <h2 className="mt-2 text-2xl font-bold text-[#166534]">PASSED</h2>
-            <p className="mt-2 text-sm text-foreground">Total score: <strong>{verdict.total}</strong></p>
-            <p className="mt-3 text-sm text-muted-foreground">
-              This person passed all required rounds.<br />
-              Pass them to the Expert Creation team.
+        <div className="space-y-4">
+          <div className={`${card} ${cardPad}`}>
+            <StatusPill kind="passed" label="Passed" />
+            <h2 className="mt-3 text-[20px] font-semibold tracking-tight text-[#1A1A1A]">
+              Round {round} passed
+            </h2>
+            <p className="mt-1 text-[14px] text-[#6B6B6B]">
+              Total score: <span className="font-medium text-[#1A1A1A]">{verdict.total}</span>
             </p>
+            {isLastRound && (
+              <p className="mt-2 text-[14px] text-[#6B6B6B]">
+                Pass this lead to the Expert Creation team.
+              </p>
+            )}
           </div>
           {isLastRound && (
-            <div className="rounded-2xl border border-border bg-white p-6">
-              <Label>Select Expert Creation Agent</Label>
+            <div className={`${card} ${cardPad}`}>
+              <FieldLabel>Select Expert Creation Agent</FieldLabel>
               <div className="mt-2 space-y-3">
                 <Select value={nextOwner} onValueChange={setNextOwner}>
-                  <SelectTrigger className="h-11"><SelectValue placeholder="Choose agent…" /></SelectTrigger>
+                  <SelectTrigger className="h-10 rounded-[8px] border-[#EBEBEB]">
+                    <SelectValue placeholder="Choose agent" />
+                  </SelectTrigger>
                   <SelectContent>
                     {(poolQ.data?.members ?? []).map((m) => (
                       <SelectItem key={m} value={m}>{m}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                <Button
-                  onClick={submit}
-                  disabled={!nextOwner || busy}
-                  className="h-11 w-full bg-[#F45722] font-semibold hover:bg-[#D94A1E]"
-                >
+                <PrimaryButton onClick={submit} disabled={!nextOwner || busy} className="w-full">
                   Pass to Expert Creation
-                </Button>
+                </PrimaryButton>
               </div>
             </div>
           )}
@@ -577,40 +601,45 @@ function RoundActions({ data, round, onChanged }: { data: LeadData; round: numbe
     }
     if (failed) {
       return (
-        <div className="rounded-2xl border border-border bg-[#FEEEE9] p-8 text-center">
-          <div className="text-3xl">❌</div>
-          <h2 className="mt-2 text-2xl font-bold text-[#7F1D1D]">NOT PASSED</h2>
-          <p className="mt-2 text-sm text-foreground">Score: <strong>{verdict.total}</strong></p>
-          <p className="mt-3 text-sm text-muted-foreground">
-            This lead did not meet the required score.<br />
-            No further action needed.
+        <div className={`${card} ${cardPad}`}>
+          <StatusPill kind="failed" label="Not passed" />
+          <h2 className="mt-3 text-[20px] font-semibold tracking-tight text-[#1A1A1A]">
+            Round {round} not passed
+          </h2>
+          <p className="mt-1 text-[14px] text-[#6B6B6B]">
+            Score: <span className="font-medium text-[#1A1A1A]">{verdict.total}</span>
           </p>
+          <p className="mt-2 text-[14px] text-[#6B6B6B]">No further action needed.</p>
         </div>
       );
     }
   }
 
   return (
-    <div className="rounded-2xl border border-border bg-white p-6 shadow-[0_2px_8px_rgba(244,87,34,0.06)]">
-      <div className="flex items-center gap-2 text-lg font-semibold">
-        <span aria-hidden>🎙️</span> Round {round} Interview
-      </div>
-      <p className="mt-1 text-sm text-muted-foreground">Grade each question from 0 (poor) to 5 (excellent).</p>
+    <div className={`${card} ${cardPad}`}>
+      <div className="text-[16px] font-semibold text-[#1A1A1A]">Round {round}</div>
+      <p className="mt-1 text-[14px] text-[#6B6B6B]">
+        Grade each question from 0 (poor) to 5 (excellent).
+      </p>
 
-      {startQ.isLoading && <div className="mt-5 text-sm text-muted-foreground">Loading questions…</div>}
-      {startQ.error && (
-        <div className="mt-4 rounded-xl border border-[#FECACA] bg-[#FEE2E2] p-3 text-sm text-[#7F1D1D]">
-          {(startQ.error as Error).message}
+      {startQ.isLoading && (
+        <div className="mt-5 space-y-3">
+          <div className="h-16 animate-pulse rounded-[8px] bg-[#F3F4F6]" />
+          <div className="h-16 animate-pulse rounded-[8px] bg-[#F3F4F6]" />
         </div>
       )}
+      {startQ.error && (
+        <p className="mt-4 text-[14px] text-[#E53935]">{(startQ.error as Error).message}</p>
+      )}
 
-      <div className="mt-5 space-y-5">
+      <div className="mt-6 space-y-6">
         {questions.map((q, i) => (
           <div key={q.question_id}>
-            <Label className="text-sm font-medium">
-              Q{i + 1}. {q.question_text}
-            </Label>
-            <div className="mt-2 flex flex-wrap gap-2">
+            <div className="text-[12px] font-medium text-[#6B6B6B]">
+              Question {i + 1} of {questions.length}
+            </div>
+            <p className="mt-1 text-[15px] text-[#1A1A1A]">{q.question_text}</p>
+            <div className="mt-3 flex flex-wrap gap-2">
               {[0, 1, 2, 3, 4, 5].map((n) => {
                 const selected = grades[q.question_id] === n;
                 return (
@@ -618,10 +647,10 @@ function RoundActions({ data, round, onChanged }: { data: LeadData; round: numbe
                     key={n}
                     type="button"
                     onClick={() => setGrades({ ...grades, [q.question_id]: n })}
-                    className={`flex h-11 w-11 items-center justify-center rounded-lg border text-base font-semibold transition-colors ${
+                    className={`h-10 w-10 rounded-[8px] border text-[15px] font-semibold transition-all duration-150 ${
                       selected
                         ? "border-[#F45722] bg-[#F45722] text-white"
-                        : "border-border bg-white text-foreground hover:border-[#FDD9CE] hover:bg-[#FEEEE9]/50"
+                        : "border-[#EBEBEB] bg-white text-[#6B6B6B] hover:border-[#D0D0D0]"
                     }`}
                   >
                     {n}
@@ -633,49 +662,55 @@ function RoundActions({ data, round, onChanged }: { data: LeadData; round: numbe
         ))}
       </div>
 
-      <div className="mt-5">
-        <Label>Your notes about this round (optional)</Label>
-        <Textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={3} className="mt-2" />
+      <div className="mt-6 space-y-1.5">
+        <FieldLabel>Notes (optional)</FieldLabel>
+        <textarea
+          value={remarks}
+          onChange={(e) => setRemarks(e.target.value)}
+          rows={3}
+          className="w-full rounded-[8px] border border-[#EBEBEB] bg-white px-3 py-2 text-[15px] text-[#1A1A1A] placeholder:text-[#ADADAD] transition-all duration-150 focus:border-[#F45722] focus:outline-none focus:ring-[3px] focus:ring-[#F45722]/10"
+        />
       </div>
 
-      <div className="mt-5">
-        <Label>
+      <div className="mt-6 space-y-1.5">
+        <FieldLabel>
           {isLastRound
             ? "If they pass, who creates their expert profile?"
             : `If they pass, who conducts Round ${round + 1}?`}
-        </Label>
+        </FieldLabel>
         <Select value={nextOwner} onValueChange={setNextOwner}>
-          <SelectTrigger className="mt-2 h-11"><SelectValue placeholder="Select a person…" /></SelectTrigger>
+          <SelectTrigger className="h-10 rounded-[8px] border-[#EBEBEB]">
+            <SelectValue placeholder="Select a person" />
+          </SelectTrigger>
           <SelectContent>
             {(poolQ.data?.members ?? []).map((m) => (
               <SelectItem key={m} value={m}>{m}</SelectItem>
             ))}
           </SelectContent>
         </Select>
-        <p className="mt-1.5 text-xs text-muted-foreground">
-          Only used if they pass this round. Ignored if they fail.
-        </p>
+        <p className="text-[12px] text-[#6B6B6B]">Only used if they pass this round.</p>
       </div>
 
       {questions.length > 0 && (
-        <div className="mt-6">
-          <div className="flex justify-between text-xs text-muted-foreground">
-            <span>Progress: {graded} of {questions.length} graded</span>
-            <span>{pct}%</span>
-          </div>
-          <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-[#FEEEE9]">
-            <div className="h-full bg-[#F45722] transition-all" style={{ width: `${pct}%` }} />
-          </div>
+        <div className="mt-6 text-[13px] text-[#6B6B6B]">
+          {graded} of {questions.length} questions graded
         </div>
       )}
 
-      <Button
-        onClick={submit}
-        disabled={busy || !allGraded}
-        className="mt-5 h-11 w-full bg-[#F45722] text-base font-semibold hover:bg-[#D94A1E]"
-      >
-        {busy ? "Submitting…" : `Submit Round ${round}`}
-      </Button>
+      <div className="mt-4">
+        <PrimaryButton
+          onClick={submit}
+          disabled={busy || !allGraded}
+          className="w-full"
+        >
+          {busy ? "Submitting" : `Submit Round ${round}`}
+        </PrimaryButton>
+        {!allGraded && questions.length > 0 && (
+          <p className="mt-2 text-center text-[12px] text-[#6B6B6B]">
+            Grade all questions to continue.
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -692,45 +727,41 @@ function ProfileActions({ data, onChanged }: { data: LeadData; onChanged: () => 
 
   async function submit() {
     if (!expertId) {
-      toast.warning("Please pick an expert ID first.");
+      toast.warning("Select an expert ID first.");
       return;
     }
     setBusy(true);
     try {
       await linkFn({ data: { lead_id: lead.id, expert_id: expertId } });
-      toast.success("Expert profile linked successfully");
+      toast.success("Expert profile linked.");
       onChanged();
     } catch (e) {
-      toast.error("Couldn't link profile", { description: (e as Error).message });
+      toast.error("Something went wrong. Try again.", { description: (e as Error).message });
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <div className="rounded-2xl border border-border bg-white p-6 shadow-[0_2px_8px_rgba(244,87,34,0.06)]">
-      <div className="flex items-center gap-2 text-lg font-semibold">
-        <span aria-hidden>👤</span> Link the expert profile
-      </div>
-      <p className="mt-1 text-sm text-muted-foreground">
+    <div className={`${card} ${cardPad}`}>
+      <div className="text-[16px] font-semibold text-[#1A1A1A]">Link the expert profile</div>
+      <p className="mt-1 text-[14px] text-[#6B6B6B]">
         Create the expert profile in the AstroLokal app, sync the experts sheet, then pick the new expert ID below.
       </p>
       <div className="mt-4 space-y-3">
         <Select value={expertId} onValueChange={setExpertId}>
-          <SelectTrigger className="h-11"><SelectValue placeholder="Choose expert ID…" /></SelectTrigger>
+          <SelectTrigger className="h-10 rounded-[8px] border-[#EBEBEB]">
+            <SelectValue placeholder="Choose expert ID" />
+          </SelectTrigger>
           <SelectContent>
             {(idsQ.data?.expert_ids ?? []).map((e) => (
               <SelectItem key={e} value={e}>{e}</SelectItem>
             ))}
           </SelectContent>
         </Select>
-        <Button
-          disabled={busy || !expertId}
-          onClick={submit}
-          className="h-11 w-full bg-[#F45722] font-semibold hover:bg-[#D94A1E]"
-        >
-          {busy ? "Linking…" : "Link & mark profile created"}
-        </Button>
+        <PrimaryButton disabled={busy || !expertId} onClick={submit} className="w-full">
+          {busy ? "Linking" : "Link and mark profile created"}
+        </PrimaryButton>
       </div>
     </div>
   );

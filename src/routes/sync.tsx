@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import { getMe } from "@/lib/me.functions";
 import { syncCredentials, syncConfig, syncLeads, syncActiveExperts } from "@/lib/sync.functions";
 import { AppShell } from "@/components/AppShell";
-import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/sync")({
   beforeLoad: async () => {
@@ -67,9 +66,9 @@ function SyncPage() {
       } catch {
         /* ignore */
       }
-      toast.success(`${label} synced successfully`);
+      toast.success(`${label} synced.`);
     } catch (e) {
-      toast.error(`${label} sync failed`, { description: (e as Error).message });
+      toast.error("Something went wrong. Try again.", { description: (e as Error).message });
     } finally {
       setBusy(null);
     }
@@ -79,46 +78,50 @@ function SyncPage() {
     { key: "leads", label: "Sync Leads", desc: "Pull new leads from the leads sheet." },
     { key: "config", label: "Sync Config", desc: "Round settings, passing marks, questions, pools." },
     { key: "credentials", label: "Sync Team", desc: "Pull team members and their passwords." },
-    { key: "experts", label: "Sync Active Experts", desc: "Mark linked profiles active (runs every 15 min automatically)." },
+    { key: "experts", label: "Sync Active Experts", desc: "Mark linked profiles active." },
   ];
 
   return (
     <AppShell user={user}>
-      <div className="mx-auto max-w-2xl space-y-6">
+      <div className="mx-auto max-w-2xl space-y-8">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Sync data from Google Sheets</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Pull the latest leads, team members and round settings from your Google Sheet.
+          <h1 className="text-[28px] font-bold tracking-tight text-[#1A1A1A]">Sync</h1>
+          <p className="mt-1 text-sm text-[#6B6B6B]">
+            Pull the latest data from your Google Sheets.
           </p>
         </div>
 
-        <div className="overflow-hidden rounded-2xl border border-border bg-white shadow-[0_2px_8px_rgba(244,87,34,0.06)]">
-          <ul className="divide-y divide-border">
-            {items.map((it) => (
-              <li key={it.key} className="flex items-center justify-between gap-4 px-5 py-4">
+        <div className="overflow-hidden rounded-[10px] border border-[#EBEBEB] bg-white">
+          <ul>
+            {items.map((it, idx) => (
+              <li
+                key={it.key}
+                className={`flex items-center justify-between gap-4 px-6 py-5 ${
+                  idx > 0 ? "border-t border-[#EBEBEB]" : ""
+                }`}
+              >
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold text-foreground">{it.label}</div>
-                  <div className="text-xs text-muted-foreground">{it.desc}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    Last synced: <span className="text-foreground">{fmtTime(lastRun[it.key])}</span>
+                  <div className="text-[15px] font-semibold text-[#1A1A1A]">{it.label}</div>
+                  <div className="mt-0.5 text-[13px] text-[#6B6B6B]">{it.desc}</div>
+                  <div className="mt-1 text-[13px] text-[#6B6B6B]">
+                    Last synced: <span className="text-[#1A1A1A]">{fmtTime(lastRun[it.key])}</span>
                   </div>
                 </div>
-                <Button
+                <button
                   onClick={() => run(it.key, it.label)}
                   disabled={busy !== null}
-                  className="bg-[#F45722] font-semibold hover:bg-[#D94A1E]"
+                  className="shrink-0 rounded-[8px] bg-[#F45722] px-5 py-2.5 text-[15px] font-semibold text-white transition-colors duration-150 hover:bg-[#D94A1E] disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  {busy === it.key ? "Syncing…" : "Sync now"}
-                </Button>
+                  {busy === it.key ? "Syncing" : "Sync"}
+                </button>
               </li>
             ))}
           </ul>
         </div>
 
-        <div className="flex items-start gap-3 rounded-2xl border border-[#FDE68A] bg-[#FEF9C3] px-4 py-3 text-sm text-[#92400E]">
-          <span aria-hidden>⚠️</span>
-          <p>Sync leads every day after the admin uploads the new leads sheet.</p>
-        </div>
+        <p className="text-[13px] text-[#6B6B6B]">
+          Sync leads every day after the admin uploads the new leads sheet.
+        </p>
       </div>
     </AppShell>
   );

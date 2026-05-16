@@ -16,19 +16,19 @@ export type StatusKind =
   | "neutral";
 
 const STYLES: Record<StatusKind, { bg: string; fg: string; label: string }> = {
-  connected:     { bg: "bg-[#DCFCE7]", fg: "text-[#166534]", label: "Connected" },
-  rnr:           { bg: "bg-[#FEF3C7]", fg: "text-[#92400E]", label: "RNR" },
-  reconnect:     { bg: "bg-[#DBEAFE]", fg: "text-[#1E3A8A]", label: "Reconnect" },
-  junk:          { bg: "bg-[#E5E7EB]", fg: "text-[#374151]", label: "Junk" },
-  not_interested:{ bg: "bg-[#FEE2E2]", fg: "text-[#7F1D1D]", label: "Not Interested" },
-  passed:        { bg: "bg-[#DCFCE7]", fg: "text-[#166534]", label: "Passed" },
-  failed:        { bg: "bg-[#FEE2E2]", fg: "text-[#7F1D1D]", label: "Failed" },
-  pending:       { bg: "bg-[#FEF3C7]", fg: "text-[#92400E]", label: "Pending" },
-  active:        { bg: "bg-[#DCFCE7]", fg: "text-[#166534]", label: "Active" },
-  done:          { bg: "bg-[#DCFCE7]", fg: "text-[#166534]", label: "Done" },
-  inactive:      { bg: "bg-[#E5E7EB]", fg: "text-[#374151]", label: "Inactive" },
-  passed_on:     { bg: "bg-[#FEEEE9]", fg: "text-[#F45722]", label: "Passed to next" },
-  neutral:       { bg: "bg-[#FEEEE9]", fg: "text-[#6B6B6B]", label: "—" },
+  connected:      { bg: "bg-[#F0FDF4]", fg: "text-[#166534]", label: "Connected" },
+  rnr:            { bg: "bg-[#FFFBEB]", fg: "text-[#92400E]", label: "RNR" },
+  reconnect:      { bg: "bg-[#EFF6FF]", fg: "text-[#1E40AF]", label: "Reconnect" },
+  junk:           { bg: "bg-[#F3F4F6]", fg: "text-[#374151]", label: "Junk" },
+  not_interested: { bg: "bg-[#FEF2F2]", fg: "text-[#991B1B]", label: "Not Interested" },
+  passed:         { bg: "bg-[#F0FDF4]", fg: "text-[#166534]", label: "Passed" },
+  failed:         { bg: "bg-[#FEF2F2]", fg: "text-[#991B1B]", label: "Failed" },
+  pending:        { bg: "bg-[#FFFBEB]", fg: "text-[#92400E]", label: "Pending" },
+  active:         { bg: "bg-[#F0FDF4]", fg: "text-[#166534]", label: "Active" },
+  done:           { bg: "bg-[#F0FDF4]", fg: "text-[#166534]", label: "Done" },
+  inactive:       { bg: "bg-[#F3F4F6]", fg: "text-[#374151]", label: "Inactive" },
+  passed_on:      { bg: "bg-[#FEEEE9]", fg: "text-[#F45722]", label: "Passed on" },
+  neutral:        { bg: "bg-[#F3F4F6]", fg: "text-[#6B6B6B]", label: "—" },
 };
 
 export function StatusPill({
@@ -44,7 +44,7 @@ export function StatusPill({
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap",
+        "inline-flex items-center rounded-[6px] px-2 py-[2px] text-xs font-medium whitespace-nowrap",
         s.bg,
         s.fg,
         className,
