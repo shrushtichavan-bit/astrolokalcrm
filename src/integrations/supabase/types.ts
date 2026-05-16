@@ -218,6 +218,7 @@ export type Database = {
           current_owner_email: string
           current_stage: string
           id: string
+          lead_date: string | null
           lead_id: string
           name: string
           priority: number
@@ -231,6 +232,7 @@ export type Database = {
           current_owner_email: string
           current_stage?: string
           id?: string
+          lead_date?: string | null
           lead_id: string
           name: string
           priority?: number
@@ -244,6 +246,7 @@ export type Database = {
           current_owner_email?: string
           current_stage?: string
           id?: string
+          lead_date?: string | null
           lead_id?: string
           name?: string
           priority?: number
