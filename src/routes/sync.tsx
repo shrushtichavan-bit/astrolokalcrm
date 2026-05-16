@@ -115,7 +115,7 @@ function SyncPage() {
                   disabled={busy !== null}
                   className="shrink-0 rounded-[8px] bg-[#F45722] px-5 py-2.5 text-[15px] font-semibold text-white transition-colors duration-150 hover:bg-[#D94A1E] disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  {busy === it.key ? "Syncing" : "Sync"}
+                  {busy === it.key ? "Working" : (it.cta ?? "Sync")}
                 </button>
               </li>
             ))}
