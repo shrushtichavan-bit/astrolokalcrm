@@ -82,7 +82,7 @@ function LeadDetail() {
       {!errMsg && leadQ.data && (
         <div className="grid gap-6 lg:grid-cols-[2fr_3fr]">
           <LeadSummary data={leadQ.data} />
-          <ActionsPanel data={leadQ.data} role={user.role} onChanged={refresh} />
+          <ActionsPanel data={leadQ.data} userEmail={user.email} onChanged={refresh} />
         </div>
       )}
     </AppShell>
