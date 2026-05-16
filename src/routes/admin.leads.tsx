@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { listAllLeads, listAllPeople, exportLeadsCsv } from "@/lib/admin.functions";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -20,6 +20,11 @@ const STAGES = [
 const STATUSES = ["connected", "rnr", "reconnect", "junk", "not_interested"];
 const VERDICTS = ["Passed", "Failed", "Pending"];
 
+type SortKey = "lead_date" | "priority" | "stage" | "updated";
+
+const PAGE_SIZE = 100;
+const MAX_RENDERED = 300;
+
 function AllLeadsPage() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -27,25 +32,46 @@ function AllLeadsPage() {
   const [stage, setStage] = useState("");
   const [status, setStatus] = useState("");
   const [verdict, setVerdict] = useState("");
-  const [sort, setSort] = useState<"lead_date" | "priority" | "stage" | "updated">("lead_date");
+  const [sort, setSort] = useState<SortKey>("lead_date");
 
-  const filters = {
-    from: from || null, to: to || null, person: person || null,
-    stage: stage || null, status: status || null, verdict: verdict || null, sort,
-  };
+  const baseFilters = useMemo(
+    () => ({
+      from: from || null, to: to || null, person: person || null,
+      stage: stage || null, status: status || null, verdict: verdict || null, sort,
+      limit: PAGE_SIZE,
+    }),
+    [from, to, person, stage, status, verdict, sort],
+  );
 
   const fn = useServerFn(listAllLeads);
   const peopleFn = useServerFn(listAllPeople);
   const exportFn = useServerFn(exportLeadsCsv);
   const peopleQ = useQuery({ queryKey: ["admin-people"], queryFn: () => peopleFn() });
-  const q = useQuery({
-    queryKey: ["admin-leads", filters],
-    queryFn: () => fn({ data: filters }),
-    staleTime: 60_000,
+
+  const infiniteQ = useInfiniteQuery({
+    queryKey: ["admin-leads", baseFilters],
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) =>
+      fn({ data: { ...baseFilters, cursor: pageParam ?? null } }),
+    getNextPageParam: (last) => last.next_cursor,
+    staleTime: 120_000, // 2 minutes
   });
 
+  const allRows = useMemo(
+    () => (infiniteQ.data?.pages ?? []).flatMap((p) => p.rows),
+    [infiniteQ.data],
+  );
+  // Keep the DOM lean: never render more than MAX_RENDERED rows.
+  const visibleRows = useMemo(
+    () => (allRows.length > MAX_RENDERED ? allRows.slice(allRows.length - MAX_RENDERED) : allRows),
+    [allRows],
+  );
+  const total = infiniteQ.data?.pages[0]?.total ?? 0;
+  const loaded = allRows.length;
+  const trimmed = allRows.length - visibleRows.length;
+
   async function downloadCsv() {
-    const { csv } = await exportFn({ data: filters });
+    const { csv } = await exportFn({ data: { ...baseFilters, cursor: null, limit: PAGE_SIZE } });
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -53,6 +79,18 @@ function AllLeadsPage() {
     a.download = `leads-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  function SortableTh({ k, label }: { k: SortKey; label: string }) {
+    const active = sort === k;
+    return (
+      <th
+        className={`px-2 py-2 text-left cursor-pointer select-none ${active ? "text-foreground" : ""}`}
+        onClick={() => setSort(k)}
+      >
+        {label}{active ? " ↓" : ""}
+      </th>
+    );
   }
 
   return (
@@ -105,7 +143,7 @@ function AllLeadsPage() {
           </div>
           <div>
             <Label className="text-xs">Sort by</Label>
-            <Select value={sort} onValueChange={(v) => setSort(v as typeof sort)}>
+            <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="lead_date">Lead date</SelectItem>
@@ -118,7 +156,14 @@ function AllLeadsPage() {
         </CardContent>
       </Card>
       <div className="flex items-center justify-between">
-        <div className="text-sm text-muted-foreground">{(q.data?.rows ?? []).length} leads</div>
+        <div className="text-sm text-muted-foreground">
+          {infiniteQ.isLoading
+            ? "Loading…"
+            : `Showing ${loaded.toLocaleString()} of ${total.toLocaleString()} leads`}
+          {trimmed > 0 && (
+            <span className="ml-2 text-xs">(oldest {trimmed} hidden to keep table fast)</span>
+          )}
+        </div>
         <Button size="sm" variant="outline" onClick={downloadCsv}>Export CSV</Button>
       </div>
       <Card>
@@ -127,52 +172,35 @@ function AllLeadsPage() {
             <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
               <tr>
                 <th className="px-2 py-2 text-left">Lead ID</th>
-                <th className="px-2 py-2 text-left">Lead Date</th>
-                <th className="px-2 py-2 text-left">Lead Name</th>
+                <th className="px-2 py-2 text-left">Name</th>
+                <th className="px-2 py-2 text-left">Contact</th>
+                <SortableTh k="lead_date" label="Lead Date" />
                 <th className="px-2 py-2 text-left">Caller</th>
-                <th className="px-2 py-2 text-left">Assigned To</th>
-                <th className="px-2 py-2 text-left">A1 Status</th>
-                <th className="px-2 py-2 text-left">A1 Time</th>
-                <th className="px-2 py-2 text-left">A2 Status</th>
-                <th className="px-2 py-2 text-left">A3 Status</th>
-                <th className="px-2 py-2 text-left">Final Calling Status</th>
-                {Array.from({ length: q.data?.num_rounds ?? 2 }, (_, i) => (
-                  <th key={i} className="px-2 py-2 text-left">Round {i + 1} (taker / status / time)</th>
-                ))}
-                <th className="px-2 py-2 text-left">Profile Creation Status</th>
-                <th className="px-2 py-2 text-left">Profile Created At</th>
-                <th className="px-2 py-2 text-left">Profile Creator</th>
-                <th className="px-2 py-2 text-left">Active/Inactive</th>
+                <th className="px-2 py-2 text-left">Calling Status</th>
+                <th className="px-2 py-2 text-left">Round 1</th>
+                <th className="px-2 py-2 text-left">Round 2</th>
+                <th className="px-2 py-2 text-left">Verdict</th>
+                <SortableTh k="stage" label="Current Stage" />
+                <SortableTh k="updated" label="Last Updated" />
                 <th className="px-2 py-2"></th>
               </tr>
             </thead>
             <tbody>
-              {(q.data?.rows ?? []).map((r) => (
+              {visibleRows.map((r) => (
                 <tr key={r.id} className="border-t hover:bg-muted/30 align-top">
                   <td className="px-2 py-2 font-mono text-[11px]">{r.lead_id}</td>
-                  <td className="px-2 py-2 text-muted-foreground">{r.lead_date ?? "—"}</td>
                   <td className="px-2 py-2">{r.name}</td>
+                  <td className="px-2 py-2 text-xs text-muted-foreground">{r.contact}</td>
+                  <td className="px-2 py-2 text-muted-foreground">{r.lead_date ?? "—"}</td>
                   <td className="px-2 py-2 text-xs text-muted-foreground">{r.caller}</td>
-                  <td className="px-2 py-2 text-xs text-muted-foreground">{r.owner}</td>
-                  <td className="px-2 py-2">{r.a1}</td>
-                  <td className="px-2 py-2 text-xs text-muted-foreground">{r.a1_at ? new Date(r.a1_at).toLocaleString() : "—"}</td>
-                  <td className="px-2 py-2">{r.a2}</td>
-                  <td className="px-2 py-2">{r.a3}</td>
-                  <td className="px-2 py-2">{r.final_calling_status}</td>
-                  {Array.from({ length: q.data?.num_rounds ?? 2 }, (_, i) => {
-                    const ri = r.rounds_status?.[i + 1];
-                    return (
-                      <td key={i} className="px-2 py-2 text-xs">
-                        <div className="text-muted-foreground">{ri?.taker ?? "—"}</div>
-                        <div className="font-medium text-foreground">{ri?.status ?? "—"}</div>
-                        <div className="text-muted-foreground">{ri?.submitted_at ? new Date(ri.submitted_at).toLocaleString() : "—"}</div>
-                      </td>
-                    );
-                  })}
-                  <td className="px-2 py-2">{r.profile_creation_status}</td>
-                  <td className="px-2 py-2 text-xs text-muted-foreground">{r.profile_created_at ? new Date(r.profile_created_at).toLocaleString() : "—"}</td>
-                  <td className="px-2 py-2 text-xs text-muted-foreground">{r.profile_creator}</td>
-                  <td className="px-2 py-2">{r.active_status}</td>
+                  <td className="px-2 py-2">{r.calling_status}</td>
+                  <td className="px-2 py-2">{r.round_1_status}</td>
+                  <td className="px-2 py-2">{r.round_2_status}</td>
+                  <td className="px-2 py-2">{r.verdict}</td>
+                  <td className="px-2 py-2 text-xs">{r.current_stage}</td>
+                  <td className="px-2 py-2 text-xs text-muted-foreground">
+                    {r.updated_at ? new Date(r.updated_at).toLocaleString() : "—"}
+                  </td>
                   <td className="px-2 py-2 text-right">
                     <Link to="/leads/$id" params={{ id: r.id }} className="text-xs font-medium text-[#F45722] hover:text-[#D94A1E]">Open</Link>
                   </td>
@@ -182,6 +210,19 @@ function AllLeadsPage() {
           </table>
         </CardContent>
       </Card>
+      <div className="flex justify-center py-4">
+        {infiniteQ.hasNextPage ? (
+          <Button
+            variant="outline"
+            disabled={infiniteQ.isFetchingNextPage}
+            onClick={() => infiniteQ.fetchNextPage()}
+          >
+            {infiniteQ.isFetchingNextPage ? "Loading…" : "Load more"}
+          </Button>
+        ) : loaded > 0 ? (
+          <div className="text-xs text-muted-foreground">End of results</div>
+        ) : null}
+      </div>
     </div>
   );
 }
