@@ -42,6 +42,8 @@ function Dashboard() {
     placeholderData: (prev) => prev,
   });
   const [doneOpen, setDoneOpen] = useState(false);
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
 
   function prefetchLead(id: string) {
     qc.prefetchQuery({
@@ -51,10 +53,21 @@ function Dashboard() {
     });
   }
 
-  const active = leadsQ.data?.active ?? [];
+  const activeAll = leadsQ.data?.active ?? [];
   const done = leadsQ.data?.done ?? [];
   const summary = leadsQ.data?.summary;
   const numRounds = leadsQ.data?.cfg.num_rounds ?? 2;
+
+  const active = useMemo(() => {
+    if (!fromDate && !toDate) return activeAll;
+    return activeAll.filter((l) => {
+      const d = l.lead_date;
+      if (!d) return false;
+      if (fromDate && d < fromDate) return false;
+      if (toDate && d > toDate) return false;
+      return true;
+    });
+  }, [activeAll, fromDate, toDate]);
 
   const { grouped, bucketOrder } = useMemo(() => {
     const g: Record<string, typeof active> = {};
@@ -104,6 +117,19 @@ function Dashboard() {
               : `${totalPending} pending action${totalPending === 1 ? "" : "s"}.`}
           </p>
         </section>
+
+        <Card>
+          <CardContent className="grid grid-cols-2 gap-3 p-4">
+            <div>
+              <label className="text-xs text-muted-foreground">From</label>
+              <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="block w-full rounded-md border px-2 py-1 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground">To</label>
+              <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="block w-full rounded-md border px-2 py-1 text-sm" />
+            </div>
+          </CardContent>
+        </Card>
 
         {summaryRows.length > 0 && (
           <Card>
@@ -183,6 +209,7 @@ function Dashboard() {
                             <div className="font-medium">{l.name}</div>
                             <div className="font-mono text-[11px] text-muted-foreground">
                               {l.lead_id}
+                              {l.lead_date && <span className="ml-2 text-muted-foreground/70">· {l.lead_date}</span>}
                             </div>
                           </td>
                           <td className="px-4 py-2">{l.contact}</td>

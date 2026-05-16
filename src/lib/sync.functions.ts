@@ -4,7 +4,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { readTab, SHEETS_TABS } from "./sheets.server";
 import { hashPassword, requireRole } from "./auth.server";
 
-const VALID_ROLES = new Set(["telecaller", "kam", "expert_creation_agent"]);
+const VALID_ROLES = new Set(["telecaller", "kam", "expert_creation_agent", "admin"]);
 const VALID_STAGES = new Set(["round_1", "round_2", "round_3", "round_4", "expert_creation"]);
 
 /** Sync credentials tab → users table. Hashes plain-text passwords with bcrypt. */
@@ -57,6 +57,7 @@ export const syncLeads = createServerFn({ method: "POST" }).handler(async () => 
     assigned_to_email: string;
     current_stage: string;
     current_owner_email: string;
+    lead_date: string | null;
   };
   const toInsert: LeadInsert[] = [];
   const errors: string[] = [];
@@ -68,6 +69,11 @@ export const syncLeads = createServerFn({ method: "POST" }).handler(async () => 
       continue;
     }
     if (existingSet.has(lead_id)) {
+      // Backfill lead_date on existing rows
+      const ld = parseLeadDate(r.lead_date);
+      if (ld) {
+        await supabaseAdmin.from("leads").update({ lead_date: ld }).eq("lead_id", lead_id).is("lead_date", null);
+      }
       skipped++;
       continue;
     }
@@ -86,6 +92,7 @@ export const syncLeads = createServerFn({ method: "POST" }).handler(async () => 
       assigned_to_email: assigned,
       current_stage: "calling_pending",
       current_owner_email: assigned,
+      lead_date: parseLeadDate(r.lead_date),
     });
   }
 
@@ -97,6 +104,20 @@ export const syncLeads = createServerFn({ method: "POST" }).handler(async () => 
   }
   return { inserted, skipped, total: rows.length, errors };
 });
+
+/** Parse DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD, or YYYY/MM/DD into ISO date. */
+function parseLeadDate(raw: string | undefined | null): string | null {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  // YYYY-MM-DD or YYYY/MM/DD
+  let m = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (m) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+  // DD/MM/YYYY or DD-MM-YYYY
+  m = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  return null;
+}
 
 /** Sync round_config + questions_r1..4 + pools — overwrites configuration. */
 export const syncConfig = createServerFn({ method: "POST" }).handler(async () => {
@@ -252,7 +273,7 @@ export const syncActiveExperts = createServerFn({ method: "POST" }).handler(asyn
 /** Run all four syncs in a sensible order. Convenience for the UI. */
 export const syncAll = createServerFn({ method: "POST" }).handler(async () => {
   // Only signed-in users should be able to invoke from the app.
-  await requireRole(["telecaller", "kam", "expert_creation_agent"]);
+  await requireRole(["telecaller", "kam", "expert_creation_agent", "admin"]);
   const credentials = await syncCredentials();
   const config = await syncConfig();
   const leads = await syncLeads();
