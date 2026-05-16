@@ -4,6 +4,7 @@ import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { requireUser } from "./auth.server";
 import { appendAudit, transitionLead } from "./lead-helpers.server";
+import { upsertLeadDumpInBackground } from "./lead-dump.server";
 
 // ---------- Helpers ----------
 
