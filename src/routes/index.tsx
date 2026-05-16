@@ -118,6 +118,19 @@ function Dashboard() {
           </p>
         </section>
 
+        <Card>
+          <CardContent className="grid grid-cols-2 gap-3 p-4">
+            <div>
+              <label className="text-xs text-muted-foreground">From</label>
+              <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="block w-full rounded-md border px-2 py-1 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground">To</label>
+              <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="block w-full rounded-md border px-2 py-1 text-sm" />
+            </div>
+          </CardContent>
+        </Card>
+
         {summaryRows.length > 0 && (
           <Card>
             <CardContent className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 md:grid-cols-3">
