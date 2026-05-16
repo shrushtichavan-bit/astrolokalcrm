@@ -7,7 +7,11 @@ import { appendAudit, transitionLead } from "./lead-helpers.server";
 
 // ---------- Helpers ----------
 
-async function loadLeadOwned(leadId: string, ownerEmail: string) {
+async function loadLeadOwned(
+  leadId: string,
+  ownerEmail: string,
+  opts: { allowAssignee?: boolean } = {},
+) {
   const { data, error } = await supabaseAdmin
     .from("leads")
     .select("*")
@@ -15,7 +19,9 @@ async function loadLeadOwned(leadId: string, ownerEmail: string) {
     .maybeSingle();
   if (error) throw error;
   if (!data) throw new Error("Lead not found");
-  if (data.current_owner_email !== ownerEmail) throw new Error("Forbidden: not your lead");
+  const isOwner = data.current_owner_email === ownerEmail;
+  const isAssignee = opts.allowAssignee && data.assigned_to_email === ownerEmail;
+  if (!isOwner && !isAssignee) throw new Error("Forbidden: not your lead");
   return data;
 }
 
