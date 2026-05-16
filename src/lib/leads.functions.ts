@@ -422,6 +422,7 @@ export const logCallOutcome = createServerFn({ method: "POST" })
     // rnr / reconnect → stay in calling_pending. After attempt 3 the lead is
     // locked by the sequence check above, so no further attempts are accepted.
 
+    upsertLeadDumpInBackground(lead.id);
     return { ok: true };
   });
 
