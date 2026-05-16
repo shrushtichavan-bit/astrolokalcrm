@@ -260,7 +260,20 @@ export const getLead = createServerFn({ method: "GET" })
           .order("performed_at", { ascending: false })
           .limit(50),
       ]);
-    return { lead, attempts: attempts ?? [], status, rounds: rounds ?? [], profile, audit: audit ?? [] };
+    const { data: cfgRow } = await supabaseAdmin
+      .from("round_config")
+      .select("num_rounds")
+      .eq("id", 1)
+      .maybeSingle();
+    return {
+      lead,
+      attempts: attempts ?? [],
+      status,
+      rounds: rounds ?? [],
+      profile,
+      audit: audit ?? [],
+      cfg: { num_rounds: cfgRow?.num_rounds ?? 2 },
+    };
   });
 
 /** Returns the pool emails for a given stage (for UI dropdowns). */
