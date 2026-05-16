@@ -4,7 +4,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { readTab, SHEETS_TABS } from "./sheets.server";
 import { hashPassword, requireRole } from "./auth.server";
 
-const VALID_ROLES = new Set(["telecaller", "kam", "expert_creation_agent", "admin"]);
+const VALID_ROLES = new Set(["lma", "kam", "sme", "admin"]);
 const VALID_STAGES = new Set(["round_1", "round_2", "round_3", "round_4", "expert_creation"]);
 
 /**
@@ -375,7 +375,7 @@ export const syncActiveExperts = createServerFn({ method: "POST" }).handler(asyn
 
 /** Run all four syncs in a sensible order. Convenience for the UI. */
 export const syncAll = createServerFn({ method: "POST" }).handler(async () => {
-  await requireRole(["telecaller", "kam", "expert_creation_agent", "admin"]);
+  await requireRole(["lma", "kam", "sme", "admin"]);
   const credentials = await syncCredentials();
   const config = await syncConfig();
   const leads = await syncLeads();

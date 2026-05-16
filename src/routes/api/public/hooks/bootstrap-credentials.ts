@@ -5,7 +5,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { readTab, SHEETS_TABS } from "@/lib/sheets.server";
 import { hashPassword } from "@/lib/auth.server";
 
-const VALID_ROLES = new Set(["telecaller", "kam", "expert_creation_agent"]);
+const VALID_ROLES = new Set(["lma", "kam", "sme", "admin"]);
 
 export const Route = createFileRoute("/api/public/hooks/bootstrap-credentials")({
   server: {
