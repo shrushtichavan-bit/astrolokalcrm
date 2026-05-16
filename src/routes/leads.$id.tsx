@@ -198,9 +198,48 @@ function Row({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
   );
 }
 
-function ActionsPanel({ data, role, onChanged }: { data: LeadData; role: string; onChanged: () => void }) {
-  void role;
+function ActionsPanel({ data, userEmail, onChanged }: { data: LeadData; userEmail: string; onChanged: () => void }) {
   const stage = data.lead.current_stage;
+  const isOwner = data.lead.current_owner_email === userEmail;
+
+  // If lead has been passed on (I'm no longer current owner), show passed card.
+  if (!isOwner) {
+    const forLabel =
+      stage === "calling_pending"
+        ? "Calling"
+        : stage === "profile_creation_pending"
+        ? "Expert Creation"
+        : stage.startsWith("round_") && stage.endsWith("_pending")
+        ? `Round ${stage.replace(/[^0-9]/g, "")}`
+        : stage;
+    return (
+      <Card>
+        <CardContent className="space-y-3 p-6">
+          <div className="flex items-center gap-2 text-base font-medium">
+            <span className="text-green-600">✅</span> Lead Passed
+          </div>
+          <div className="space-y-1 text-sm">
+            <div>
+              <span className="text-muted-foreground">Assigned to: </span>
+              <strong>{data.lead.current_owner_email}</strong>
+            </div>
+            <div>
+              <span className="text-muted-foreground">For: </span>
+              <strong>{forLabel}</strong>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Passed on: </span>
+              {new Date(data.lead.updated_at).toLocaleString()}
+            </div>
+          </div>
+          <p className="pt-2 text-sm text-muted-foreground">
+            Your work on this lead is done.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
   if (stage === "calling_pending") {
     return <CallingActions data={data} onChanged={onChanged} />;
   }
