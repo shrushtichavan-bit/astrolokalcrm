@@ -3,6 +3,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { readTab, SHEETS_TABS } from "./sheets.server";
 import { hashPassword, requireRole } from "./auth.server";
+import { rebuildLeadDump, upsertLeadDumpInBackground } from "./lead-dump.server";
 
 const VALID_ROLES = new Set(["lma", "kam", "sme", "admin"]);
 const VALID_STAGES = new Set(["round_1", "round_2", "round_3", "round_4", "expert_creation"]);
@@ -346,6 +347,7 @@ export const syncActiveExperts = createServerFn({ method: "POST" }).handler(asyn
       metadata: { source: "active_experts_sync" } as never,
     }));
     await supabaseAdmin.from("audit_log").insert(auditRows);
+    for (const lid of leadIdsActivated) upsertLeadDumpInBackground(lid);
   }
 
   const activeTotal = (profiles ?? []).filter((p) => {
@@ -381,4 +383,12 @@ export const syncAll = createServerFn({ method: "POST" }).handler(async () => {
   const leads = await syncLeads();
   const experts = await syncActiveExperts();
   return { credentials, config, leads, experts };
+});
+
+/**
+ * Full rebuild of the lead_dump tab. Clears, writes a fresh header based on
+ * the current round config, then writes one row per lead in batches of 50.
+ */
+export const writeLeadDump = createServerFn({ method: "POST" }).handler(async () => {
+  return await rebuildLeadDump();
 });

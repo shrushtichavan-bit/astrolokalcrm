@@ -4,6 +4,7 @@ import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { requireUser } from "./auth.server";
 import { appendAudit, transitionLead } from "./lead-helpers.server";
+import { upsertLeadDumpInBackground } from "./lead-dump.server";
 
 // ---------- Helpers ----------
 
@@ -421,6 +422,7 @@ export const logCallOutcome = createServerFn({ method: "POST" })
     // rnr / reconnect → stay in calling_pending. After attempt 3 the lead is
     // locked by the sequence check above, so no further attempts are accepted.
 
+    upsertLeadDumpInBackground(lead.id);
     return { ok: true };
   });
 
@@ -481,6 +483,7 @@ export const logCallAttempt = createServerFn({ method: "POST" })
       await appendAudit(lead.id, "calling_status:rnr", u.email, { auto: true });
       autoStatus = "rnr";
     }
+    upsertLeadDumpInBackground(lead.id);
     return { ok: true, auto_status: autoStatus };
   });
 
@@ -552,6 +555,7 @@ export const setCallingStatus = createServerFn({ method: "POST" })
     }
     // reconnect / rnr — stays in calling bucket; no transition.
 
+    upsertLeadDumpInBackground(lead.id);
     return { ok: true };
   });
 
@@ -683,6 +687,7 @@ export const submitRound = createServerFn({ method: "POST" })
         total_score: total,
         reason: `Score ${total} below passing ${thisRoundPass} for round ${data.round_number}`,
       });
+      upsertLeadDumpInBackground(lead.id);
       return { ok: true, total_score: total, verdict: "failed" as const };
     }
 
@@ -707,6 +712,7 @@ export const submitRound = createServerFn({ method: "POST" })
         round_number: data.round_number,
         total_score: total,
       });
+      upsertLeadDumpInBackground(lead.id);
       return { ok: true, total_score: total, verdict: "passed" as const };
     }
 
@@ -721,6 +727,7 @@ export const submitRound = createServerFn({ method: "POST" })
     const completed = doneRounds ?? [];
     if (completed.length < requiredVerdictRounds) {
       // Should not happen on the final round, but guard.
+      upsertLeadDumpInBackground(lead.id);
       return { ok: true, total_score: total, verdict: null };
     }
     let passed = true;
@@ -748,12 +755,14 @@ export const submitRound = createServerFn({ method: "POST" })
         verdict: "passed",
         total_score: total,
       });
+      upsertLeadDumpInBackground(lead.id);
       return { ok: true, total_score: total, verdict: "passed" as const };
     } else {
       await transitionLead(lead.id, "failed", lead.current_owner_email, u.email, {
         verdict: "failed",
         total_score: total,
       });
+      upsertLeadDumpInBackground(lead.id);
       return { ok: true, total_score: total, verdict: "failed" as const };
     }
   });
@@ -795,6 +804,7 @@ export const linkExpertProfile = createServerFn({ method: "POST" })
     await transitionLead(lead.id, "profile_created", lead.current_owner_email, u.email, {
       expert_id: data.expert_id,
     });
+    upsertLeadDumpInBackground(lead.id);
     return { ok: true };
   });
 

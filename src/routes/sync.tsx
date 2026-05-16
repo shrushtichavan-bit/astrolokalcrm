@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { getMe } from "@/lib/me.functions";
-import { syncCredentials, syncConfig, syncLeads, syncActiveExperts } from "@/lib/sync.functions";
+import { syncCredentials, syncConfig, syncLeads, syncActiveExperts, writeLeadDump } from "@/lib/sync.functions";
 import { AppShell } from "@/components/AppShell";
 
 export const Route = createFileRoute("/sync")({
@@ -16,7 +16,7 @@ export const Route = createFileRoute("/sync")({
   component: SyncPage,
 });
 
-type Key = "leads" | "config" | "credentials" | "experts";
+type Key = "leads" | "config" | "credentials" | "experts" | "dump";
 
 function fmtTime(iso: string | null): string {
   if (!iso) return "Never";
@@ -36,6 +36,7 @@ function SyncPage() {
     config: useServerFn(syncConfig),
     credentials: useServerFn(syncCredentials),
     experts: useServerFn(syncActiveExperts),
+    dump: useServerFn(writeLeadDump),
   };
   const [busy, setBusy] = useState<Key | null>(null);
   const [lastRun, setLastRun] = useState<Record<Key, string | null>>({
@@ -43,12 +44,13 @@ function SyncPage() {
     config: null,
     credentials: null,
     experts: null,
+    dump: null,
   });
 
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem("sync-last-run");
-      if (raw) setLastRun(JSON.parse(raw));
+      if (raw) setLastRun({ leads: null, config: null, credentials: null, experts: null, dump: null, ...JSON.parse(raw) });
     } catch {
       /* ignore */
     }
@@ -57,7 +59,7 @@ function SyncPage() {
   async function run(key: Key, label: string) {
     setBusy(key);
     try {
-      await fns[key]();
+      const result = (await fns[key]()) as { summary?: string } | undefined;
       const now = new Date().toISOString();
       const next = { ...lastRun, [key]: now };
       setLastRun(next);
@@ -66,7 +68,7 @@ function SyncPage() {
       } catch {
         /* ignore */
       }
-      toast.success(`${label} synced.`);
+      toast.success(result?.summary ?? `${label} done.`);
     } catch (e) {
       toast.error("Something went wrong. Try again.", { description: (e as Error).message });
     } finally {
@@ -74,11 +76,12 @@ function SyncPage() {
     }
   }
 
-  const items: Array<{ key: Key; label: string; desc: string }> = [
+  const items: Array<{ key: Key; label: string; desc: string; cta?: string }> = [
     { key: "leads", label: "Sync Leads", desc: "Pull new leads from the leads sheet." },
     { key: "config", label: "Sync Config", desc: "Round settings, passing marks, questions, pools." },
     { key: "credentials", label: "Sync Team", desc: "Pull team members and their passwords." },
     { key: "experts", label: "Sync Active Experts", desc: "Mark linked profiles active." },
+    { key: "dump", label: "Write Lead Dump", desc: "Rebuild the lead_dump tab with every lead's current funnel state.", cta: "Write" },
   ];
 
   return (
@@ -112,7 +115,7 @@ function SyncPage() {
                   disabled={busy !== null}
                   className="shrink-0 rounded-[8px] bg-[#F45722] px-5 py-2.5 text-[15px] font-semibold text-white transition-colors duration-150 hover:bg-[#D94A1E] disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  {busy === it.key ? "Syncing" : "Sync"}
+                  {busy === it.key ? "Working" : (it.cta ?? "Sync")}
                 </button>
               </li>
             ))}

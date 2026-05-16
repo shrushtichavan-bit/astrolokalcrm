@@ -61,5 +61,60 @@ export const SHEETS_TABS = {
   roundConfig: "round_config",
   pools: "pools",
   activeExperts: "active_experts",
+  leadDump: "lead_dump",
   questions: (n: number) => `questions_r${n}`,
 } as const;
+
+/** PUT values to a range. Caller chooses valueInputOption (USER_ENTERED keeps formulas, RAW does not). */
+export async function writeRange(
+  range: string,
+  values: (string | number)[][],
+  opts: { valueInputOption?: "RAW" | "USER_ENTERED" } = {},
+): Promise<void> {
+  const vio = opts.valueInputOption ?? "USER_ENTERED";
+  const url = `${GATEWAY_URL}/spreadsheets/${SPREADSHEET_ID}/values/${range}?valueInputOption=${vio}`;
+  const res = await fetch(url, {
+    method: "PUT",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ range, majorDimension: "ROWS", values }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Sheets write failed [${res.status}] for ${range}: ${body}`);
+  }
+}
+
+/** Append rows to a tab (after the last row of data). */
+export async function appendRange(
+  range: string,
+  values: (string | number)[][],
+  opts: { valueInputOption?: "RAW" | "USER_ENTERED" } = {},
+): Promise<void> {
+  const vio = opts.valueInputOption ?? "USER_ENTERED";
+  const url =
+    `${GATEWAY_URL}/spreadsheets/${SPREADSHEET_ID}/values/${range}:append` +
+    `?valueInputOption=${vio}&insertDataOption=INSERT_ROWS`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ range, majorDimension: "ROWS", values }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Sheets append failed [${res.status}] for ${range}: ${body}`);
+  }
+}
+
+/** Clear all values from a range/tab. */
+export async function clearRange(range: string): Promise<void> {
+  const url = `${GATEWAY_URL}/spreadsheets/${SPREADSHEET_ID}/values/${range}:clear`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: "{}",
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Sheets clear failed [${res.status}] for ${range}: ${body}`);
+  }
+}
