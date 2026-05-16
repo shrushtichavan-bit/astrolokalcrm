@@ -137,7 +137,7 @@ function SyncPage() {
                     Last synced: <span className="text-[#1A1A1A]">{fmtTime(lastRun[it.key])}</span>
                   </div>
                   <div className="text-[13px] text-[#6B6B6B]">
-                    Next sync: <span className="text-[#1A1A1A]">{fmtTime(nextSync)}</span>
+                    Next sync: <span className="text-[#1A1A1A]">{fmtTime(nextSyncIso(OFFSETS[it.key]))}</span>
                   </div>
                 </div>
                 <button
