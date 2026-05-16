@@ -630,13 +630,18 @@ export const exportLeadsCsv = createServerFn({ method: "POST" })
   .handler(async ({ data: f }) => {
     await requireRole("admin");
     const { rows, num_rounds } = await buildAllLeadsRows(f);
-    const roundHeaders = Array.from({ length: num_rounds }, (_, i) => `round_${i + 1}_status`);
+    const roundHeaders = Array.from({ length: num_rounds }, (_, i) => [
+      `round_${i + 1}_status`,
+      `round_${i + 1}_taker`,
+      `round_${i + 1}_time`,
+    ]).flat();
     const header = [
       "lead_id", "lead_date", "name", "caller",
-      "a1_status", "a2_status", "a3_status",
+      "a1_status", "a1_at", "a2_status", "a3_status",
       "final_calling_status",
       ...roundHeaders,
-      "profile_creation_status", "active_status",
+      "profile_creation_status", "profile_created_at", "profile_creator",
+      "active_status",
     ];
     const esc = (v: unknown) => {
       const s = v == null ? "" : String(v);
@@ -644,13 +649,17 @@ export const exportLeadsCsv = createServerFn({ method: "POST" })
     };
     const lines = [header.join(",")];
     for (const r of rows) {
-      const roundVals = Array.from({ length: num_rounds }, (_, i) => r.rounds_status[i + 1] ?? "—");
+      const roundVals = Array.from({ length: num_rounds }, (_, i) => {
+        const ri = r.rounds_status[i + 1];
+        return [ri?.status ?? "—", ri?.taker ?? "—", ri?.submitted_at ?? ""];
+      }).flat();
       lines.push([
         r.lead_id, r.lead_date ?? "", r.name, r.caller,
-        r.a1, r.a2, r.a3,
+        r.a1, r.a1_at ?? "", r.a2, r.a3,
         r.final_calling_status,
         ...roundVals,
-        r.profile_creation_status, r.active_status,
+        r.profile_creation_status, r.profile_created_at ?? "", r.profile_creator,
+        r.active_status,
       ].map(esc).join(","));
     }
     return { csv: lines.join("\n") };
