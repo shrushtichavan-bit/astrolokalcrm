@@ -1,0 +1,1 @@
+ALTER TABLE public.users DROP CONSTRAINT IF EXISTS users_role_check;
