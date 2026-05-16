@@ -19,7 +19,7 @@ export const getRouter = () => {
       const all = queryClient
         .getQueryCache()
         .getAll()
-        .filter((q) => Array.isArray(q.queryKey) && q.queryKey[0] === "lead-detail");
+        .filter((q) => Array.isArray(q.queryKey) && q.queryKey[0] === "lead");
       if (all.length <= MAX_LEAD_DETAIL_ENTRIES) return;
       all
         .sort((a, b) => (a.state.dataUpdatedAt ?? 0) - (b.state.dataUpdatedAt ?? 0))
