@@ -57,6 +57,7 @@ export type Database = {
           connected: boolean
           id: string
           lead_id: string
+          outcome: string | null
         }
         Insert: {
           attempt_number: number
@@ -65,6 +66,7 @@ export type Database = {
           connected: boolean
           id?: string
           lead_id: string
+          outcome?: string | null
         }
         Update: {
           attempt_number?: number
@@ -73,6 +75,7 @@ export type Database = {
           connected?: boolean
           id?: string
           lead_id?: string
+          outcome?: string | null
         }
         Relationships: [
           {
