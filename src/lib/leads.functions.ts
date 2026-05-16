@@ -683,13 +683,38 @@ export const submitRound = createServerFn({ method: "POST" })
       })),
     );
 
-    // Stage transition
+    // Per-round pass check: if this round's score is below passing marks,
+    // mark lead failed immediately — do not proceed to next round.
+    const thisRoundPass = marksMap.get(data.round_number);
+    const roundPassed = thisRoundPass == null ? true : total >= thisRoundPass;
+
+    if (!roundPassed) {
+      await supabaseAdmin
+        .from("interview_rounds")
+        .update({ passed: false, next_owner_email: null })
+        .eq("lead_id", lead.id)
+        .eq("round_number", data.round_number);
+      await transitionLead(lead.id, "failed", lead.current_owner_email, u.email, {
+        verdict: "failed",
+        round_number: data.round_number,
+        total_score: total,
+        reason: `Score ${total} below passing ${thisRoundPass} for round ${data.round_number}`,
+      });
+      return { ok: true, total_score: total, verdict: "failed" as const };
+    }
+
+    // Stage transition for passed non-final round
     if (!isLastRound) {
+      await supabaseAdmin
+        .from("interview_rounds")
+        .update({ passed: true })
+        .eq("lead_id", lead.id)
+        .eq("round_number", data.round_number);
       await transitionLead(lead.id, nextStage, nextOwner, u.email, {
         round_number: data.round_number,
         total_score: total,
       });
-      return { ok: true, total_score: total, verdict: null as null | "passed" | "failed" };
+      return { ok: true, total_score: total, verdict: "passed" as const };
     }
 
     // Final round → compute verdict
