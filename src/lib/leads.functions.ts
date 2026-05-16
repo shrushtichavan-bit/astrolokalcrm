@@ -555,6 +555,7 @@ export const setCallingStatus = createServerFn({ method: "POST" })
     }
     // reconnect / rnr — stays in calling bucket; no transition.
 
+    upsertLeadDumpInBackground(lead.id);
     return { ok: true };
   });
 
