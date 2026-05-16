@@ -61,7 +61,22 @@ export const listMyLeads = createServerFn({ method: "GET" }).handler(async () =>
     .order("updated_at", { ascending: false })
     .limit(500);
   if (error) throw error;
-  return { leads: data ?? [] };
+  const list = data ?? [];
+  const callingIds = list.filter((l) => l.current_stage === "calling_pending").map((l) => l.id);
+  const attemptsByLead = new Map<string, number>();
+  if (callingIds.length > 0) {
+    const { data: atts } = await supabaseAdmin
+      .from("call_attempts")
+      .select("lead_id, attempt_number")
+      .in("lead_id", callingIds);
+    for (const a of atts ?? []) {
+      const prev = attemptsByLead.get(a.lead_id) ?? 0;
+      if (a.attempt_number > prev) attemptsByLead.set(a.lead_id, a.attempt_number);
+    }
+  }
+  return {
+    leads: list.map((l) => ({ ...l, attempts_logged: attemptsByLead.get(l.id) ?? 0 })),
+  };
 });
 
 /** Full detail of one lead (must be owned by user). */
