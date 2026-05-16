@@ -630,28 +630,11 @@ export const submitRound = createServerFn({ method: "POST" })
 
     const total = data.grades.reduce((sum, g) => sum + g.grade, 0);
 
-    // Determine if next round exists
+    // Determine if next round exists. Validation of next_owner_email is
+    // deferred until after scoring — a failing score skips the next round.
     const isLastRound = data.round_number >= cfg.num_rounds;
-    let nextStage: string;
-    let nextOwner: string;
-    if (!isLastRound) {
-      const nextStageKey = `round_${data.round_number + 1}` as
-        | "round_1"
-        | "round_2"
-        | "round_3"
-        | "round_4";
-      if (!data.next_owner_email)
-        throw new Error("next_owner_email is required when more rounds remain");
-      const pool = await poolMembers(nextStageKey);
-      const target = data.next_owner_email.toLowerCase();
-      if (!pool.includes(target))
-        throw new Error(`Selected owner is not in the ${nextStageKey} pool`);
-      nextStage = `round_${data.round_number + 1}_pending`;
-      nextOwner = target;
-    } else {
-      nextStage = ""; // computed below from verdict
-      nextOwner = "";
-    }
+    let nextStage = "";
+    let nextOwner = "";
 
     // Insert interview_round + grades
     const { data: roundRow, error: roundErr } = await supabaseAdmin
