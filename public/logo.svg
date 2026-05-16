@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 48" fill="none">
+  <g>
+    <circle cx="24" cy="24" r="18" fill="#F45722"/>
+    <path d="M24 10 L27.5 20.5 L38 24 L27.5 27.5 L24 38 L20.5 27.5 L10 24 L20.5 20.5 Z" fill="#FFFFFF"/>
+  </g>
+  <text x="52" y="31" font-family="Inter, sans-serif" font-size="20" font-weight="700" fill="#1A1A1A" letter-spacing="-0.3">AstroLokal</text>
+</svg>
