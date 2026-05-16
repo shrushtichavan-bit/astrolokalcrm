@@ -72,14 +72,20 @@ function AllLeadsPage() {
   const trimmed = allRows.length - visibleRows.length;
 
   async function downloadCsv() {
-    const { csv } = await exportFn({ data: { ...baseFilters, cursor: null, limit: PAGE_SIZE } });
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `leads-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const t = toast.loading("Preparing your export. This may take up to a minute for large datasets. Do not close this tab.");
+    try {
+      const { csv } = await exportFn({ data: { ...baseFilters, cursor: null, limit: PAGE_SIZE } });
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `leads-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Export ready.", { id: t });
+    } catch (e) {
+      toast.error("Export failed.", { id: t, description: (e as Error).message });
+    }
   }
 
   function SortableTh({ k, label }: { k: SortKey; label: string }) {
