@@ -21,6 +21,7 @@ import { Route as AdminLeadsRouteImport } from './routes/admin.leads'
 import { Route as ApiAuthLoginRouteImport } from './routes/api/auth/login'
 import { Route as ApiPublicHooksSyncLeadsRouteImport } from './routes/api/public/hooks/sync-leads'
 import { Route as ApiPublicHooksSyncExpertsRouteImport } from './routes/api/public/hooks/sync-experts'
+import { Route as ApiPublicHooksSyncCredentialsRouteImport } from './routes/api/public/hooks/sync-credentials'
 import { Route as ApiPublicHooksSyncConfigRouteImport } from './routes/api/public/hooks/sync-config'
 import { Route as ApiPublicHooksRebuildLeadDumpRouteImport } from './routes/api/public/hooks/rebuild-lead-dump'
 import { Route as ApiPublicHooksBootstrapCredentialsRouteImport } from './routes/api/public/hooks/bootstrap-credentials'
@@ -86,6 +87,12 @@ const ApiPublicHooksSyncExpertsRoute =
     path: '/api/public/hooks/sync-experts',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicHooksSyncCredentialsRoute =
+  ApiPublicHooksSyncCredentialsRouteImport.update({
+    id: '/api/public/hooks/sync-credentials',
+    path: '/api/public/hooks/sync-credentials',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicHooksSyncConfigRoute =
   ApiPublicHooksSyncConfigRouteImport.update({
     id: '/api/public/hooks/sync-config',
@@ -119,6 +126,7 @@ export interface FileRoutesByFullPath {
   '/api/public/hooks/bootstrap-credentials': typeof ApiPublicHooksBootstrapCredentialsRoute
   '/api/public/hooks/rebuild-lead-dump': typeof ApiPublicHooksRebuildLeadDumpRoute
   '/api/public/hooks/sync-config': typeof ApiPublicHooksSyncConfigRoute
+  '/api/public/hooks/sync-credentials': typeof ApiPublicHooksSyncCredentialsRoute
   '/api/public/hooks/sync-experts': typeof ApiPublicHooksSyncExpertsRoute
   '/api/public/hooks/sync-leads': typeof ApiPublicHooksSyncLeadsRoute
 }
@@ -135,6 +143,7 @@ export interface FileRoutesByTo {
   '/api/public/hooks/bootstrap-credentials': typeof ApiPublicHooksBootstrapCredentialsRoute
   '/api/public/hooks/rebuild-lead-dump': typeof ApiPublicHooksRebuildLeadDumpRoute
   '/api/public/hooks/sync-config': typeof ApiPublicHooksSyncConfigRoute
+  '/api/public/hooks/sync-credentials': typeof ApiPublicHooksSyncCredentialsRoute
   '/api/public/hooks/sync-experts': typeof ApiPublicHooksSyncExpertsRoute
   '/api/public/hooks/sync-leads': typeof ApiPublicHooksSyncLeadsRoute
 }
@@ -153,6 +162,7 @@ export interface FileRoutesById {
   '/api/public/hooks/bootstrap-credentials': typeof ApiPublicHooksBootstrapCredentialsRoute
   '/api/public/hooks/rebuild-lead-dump': typeof ApiPublicHooksRebuildLeadDumpRoute
   '/api/public/hooks/sync-config': typeof ApiPublicHooksSyncConfigRoute
+  '/api/public/hooks/sync-credentials': typeof ApiPublicHooksSyncCredentialsRoute
   '/api/public/hooks/sync-experts': typeof ApiPublicHooksSyncExpertsRoute
   '/api/public/hooks/sync-leads': typeof ApiPublicHooksSyncLeadsRoute
 }
@@ -172,6 +182,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/bootstrap-credentials'
     | '/api/public/hooks/rebuild-lead-dump'
     | '/api/public/hooks/sync-config'
+    | '/api/public/hooks/sync-credentials'
     | '/api/public/hooks/sync-experts'
     | '/api/public/hooks/sync-leads'
   fileRoutesByTo: FileRoutesByTo
@@ -188,6 +199,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/bootstrap-credentials'
     | '/api/public/hooks/rebuild-lead-dump'
     | '/api/public/hooks/sync-config'
+    | '/api/public/hooks/sync-credentials'
     | '/api/public/hooks/sync-experts'
     | '/api/public/hooks/sync-leads'
   id:
@@ -205,6 +217,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/bootstrap-credentials'
     | '/api/public/hooks/rebuild-lead-dump'
     | '/api/public/hooks/sync-config'
+    | '/api/public/hooks/sync-credentials'
     | '/api/public/hooks/sync-experts'
     | '/api/public/hooks/sync-leads'
   fileRoutesById: FileRoutesById
@@ -219,6 +232,7 @@ export interface RootRouteChildren {
   ApiPublicHooksBootstrapCredentialsRoute: typeof ApiPublicHooksBootstrapCredentialsRoute
   ApiPublicHooksRebuildLeadDumpRoute: typeof ApiPublicHooksRebuildLeadDumpRoute
   ApiPublicHooksSyncConfigRoute: typeof ApiPublicHooksSyncConfigRoute
+  ApiPublicHooksSyncCredentialsRoute: typeof ApiPublicHooksSyncCredentialsRoute
   ApiPublicHooksSyncExpertsRoute: typeof ApiPublicHooksSyncExpertsRoute
   ApiPublicHooksSyncLeadsRoute: typeof ApiPublicHooksSyncLeadsRoute
 }
@@ -309,6 +323,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicHooksSyncExpertsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/hooks/sync-credentials': {
+      id: '/api/public/hooks/sync-credentials'
+      path: '/api/public/hooks/sync-credentials'
+      fullPath: '/api/public/hooks/sync-credentials'
+      preLoaderRoute: typeof ApiPublicHooksSyncCredentialsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/hooks/sync-config': {
       id: '/api/public/hooks/sync-config'
       path: '/api/public/hooks/sync-config'
@@ -360,6 +381,7 @@ const rootRouteChildren: RootRouteChildren = {
     ApiPublicHooksBootstrapCredentialsRoute,
   ApiPublicHooksRebuildLeadDumpRoute: ApiPublicHooksRebuildLeadDumpRoute,
   ApiPublicHooksSyncConfigRoute: ApiPublicHooksSyncConfigRoute,
+  ApiPublicHooksSyncCredentialsRoute: ApiPublicHooksSyncCredentialsRoute,
   ApiPublicHooksSyncExpertsRoute: ApiPublicHooksSyncExpertsRoute,
   ApiPublicHooksSyncLeadsRoute: ApiPublicHooksSyncLeadsRoute,
 }
