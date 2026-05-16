@@ -384,3 +384,11 @@ export const syncAll = createServerFn({ method: "POST" }).handler(async () => {
   const experts = await syncActiveExperts();
   return { credentials, config, leads, experts };
 });
+
+/**
+ * Full rebuild of the lead_dump tab. Clears, writes a fresh header based on
+ * the current round config, then writes one row per lead in batches of 50.
+ */
+export const writeLeadDump = createServerFn({ method: "POST" }).handler(async () => {
+  return await rebuildLeadDump();
+});
