@@ -57,6 +57,7 @@ export const syncLeads = createServerFn({ method: "POST" }).handler(async () => 
     assigned_to_email: string;
     current_stage: string;
     current_owner_email: string;
+    lead_date: string | null;
   };
   const toInsert: LeadInsert[] = [];
   const errors: string[] = [];
@@ -68,6 +69,11 @@ export const syncLeads = createServerFn({ method: "POST" }).handler(async () => 
       continue;
     }
     if (existingSet.has(lead_id)) {
+      // Backfill lead_date on existing rows
+      const ld = parseLeadDate(r.lead_date);
+      if (ld) {
+        await supabaseAdmin.from("leads").update({ lead_date: ld }).eq("lead_id", lead_id).is("lead_date", null);
+      }
       skipped++;
       continue;
     }
@@ -86,6 +92,7 @@ export const syncLeads = createServerFn({ method: "POST" }).handler(async () => 
       assigned_to_email: assigned,
       current_stage: "calling_pending",
       current_owner_email: assigned,
+      lead_date: parseLeadDate(r.lead_date),
     });
   }
 
@@ -97,6 +104,20 @@ export const syncLeads = createServerFn({ method: "POST" }).handler(async () => 
   }
   return { inserted, skipped, total: rows.length, errors };
 });
+
+/** Parse DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD, or YYYY/MM/DD into ISO date. */
+function parseLeadDate(raw: string | undefined | null): string | null {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  // YYYY-MM-DD or YYYY/MM/DD
+  let m = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (m) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+  // DD/MM/YYYY or DD-MM-YYYY
+  m = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  return null;
+}
 
 /** Sync round_config + questions_r1..4 + pools — overwrites configuration. */
 export const syncConfig = createServerFn({ method: "POST" }).handler(async () => {
