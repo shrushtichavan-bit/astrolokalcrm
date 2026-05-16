@@ -2,7 +2,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { requireUser, requireRole } from "./auth.server";
+import { requireUser } from "./auth.server";
 import { appendAudit, transitionLead } from "./lead-helpers.server";
 
 // ---------- Helpers ----------
@@ -61,7 +61,22 @@ export const listMyLeads = createServerFn({ method: "GET" }).handler(async () =>
     .order("updated_at", { ascending: false })
     .limit(500);
   if (error) throw error;
-  return { leads: data ?? [] };
+  const list = data ?? [];
+  const callingIds = list.filter((l) => l.current_stage === "calling_pending").map((l) => l.id);
+  const attemptsByLead = new Map<string, number>();
+  if (callingIds.length > 0) {
+    const { data: atts } = await supabaseAdmin
+      .from("call_attempts")
+      .select("lead_id, attempt_number")
+      .in("lead_id", callingIds);
+    for (const a of atts ?? []) {
+      const prev = attemptsByLead.get(a.lead_id) ?? 0;
+      if (a.attempt_number > prev) attemptsByLead.set(a.lead_id, a.attempt_number);
+    }
+  }
+  return {
+    leads: list.map((l) => ({ ...l, attempts_logged: attemptsByLead.get(l.id) ?? 0 })),
+  };
 });
 
 /** Full detail of one lead (must be owned by user). */
@@ -110,7 +125,7 @@ export const getPool = createServerFn({ method: "GET" })
 
 /** Active expert IDs from the latest sync (for Expert Creation Agent dropdown). */
 export const listActiveExpertIds = createServerFn({ method: "GET" }).handler(async () => {
-  await requireRole("expert_creation_agent");
+  await requireUser();
   // Show all known expert_profiles + raw expert_id list. To populate a dropdown
   // of POSSIBLE expert_ids we need a stable source; we use what's been synced
   // into expert_profiles.is_active. For initial linking we expose all distinct
@@ -152,7 +167,7 @@ export const logCallOutcome = createServerFn({ method: "POST" })
         .parse(i),
   )
   .handler(async ({ data }) => {
-    const u = await requireRole("telecaller");
+    const u = await requireUser();
     const lead = await loadLeadOwned(data.lead_id, u.email);
     if (lead.current_stage !== "calling_pending")
       throw new Error("Lead is not in calling stage");
@@ -247,7 +262,7 @@ export const logCallAttempt = createServerFn({ method: "POST" })
       .parse(i),
   )
   .handler(async ({ data }) => {
-    const u = await requireRole("telecaller");
+    const u = await requireUser();
     const lead = await loadLeadOwned(data.lead_id, u.email);
     if (lead.current_stage !== "calling_pending") throw new Error("Lead is not in calling stage");
 
@@ -314,7 +329,7 @@ export const setCallingStatus = createServerFn({ method: "POST" })
         .parse(i),
   )
   .handler(async ({ data }) => {
-    const u = await requireRole("telecaller");
+    const u = await requireUser();
     const lead = await loadLeadOwned(data.lead_id, u.email);
     if (lead.current_stage !== "calling_pending") throw new Error("Lead is not in calling stage");
 
@@ -379,7 +394,7 @@ export const startRound = createServerFn({ method: "POST" })
       .parse(i),
   )
   .handler(async ({ data }) => {
-    const u = await requireRole("kam");
+    const u = await requireUser();
     const lead = await loadLeadOwned(data.lead_id, u.email);
     const expectedStage = `round_${data.round_number}_pending`;
     if (lead.current_stage !== expectedStage)
@@ -421,7 +436,7 @@ export const submitRound = createServerFn({ method: "POST" })
         .parse(i),
   )
   .handler(async ({ data }) => {
-    const u = await requireRole("kam");
+    const u = await requireUser();
     const lead = await loadLeadOwned(data.lead_id, u.email);
     const expectedStage = `round_${data.round_number}_pending`;
     if (lead.current_stage !== expectedStage)
@@ -564,7 +579,7 @@ export const linkExpertProfile = createServerFn({ method: "POST" })
       .parse(i),
   )
   .handler(async ({ data }) => {
-    const u = await requireRole("expert_creation_agent");
+    const u = await requireUser();
     const lead = await loadLeadOwned(data.lead_id, u.email);
     if (lead.current_stage !== "profile_creation_pending")
       throw new Error("Lead is not in profile creation stage");

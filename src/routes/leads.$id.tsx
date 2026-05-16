@@ -199,15 +199,16 @@ function Row({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
 }
 
 function ActionsPanel({ data, role, onChanged }: { data: LeadData; role: string; onChanged: () => void }) {
+  void role;
   const stage = data.lead.current_stage;
-  if (stage === "calling_pending" && role === "telecaller") {
+  if (stage === "calling_pending") {
     return <CallingActions data={data} onChanged={onChanged} />;
   }
   const roundMatch = stage.match(/^round_(\d+)_pending$/);
-  if (roundMatch && role === "kam") {
+  if (roundMatch) {
     return <RoundActions data={data} round={parseInt(roundMatch[1], 10)} onChanged={onChanged} />;
   }
-  if (stage === "profile_creation_pending" && role === "expert_creation_agent") {
+  if (stage === "profile_creation_pending") {
     return <ProfileActions data={data} onChanged={onChanged} />;
   }
   return (
@@ -215,7 +216,7 @@ function ActionsPanel({ data, role, onChanged }: { data: LeadData; role: string;
       <CardHeader><CardTitle className="text-sm">No actions available</CardTitle></CardHeader>
       <CardContent>
         <p className="text-sm text-muted-foreground">
-          This lead is in stage <strong>{stage}</strong>. No actions are available for your role here.
+          This lead is in stage <strong>{stage}</strong>. Nothing to do here.
         </p>
       </CardContent>
     </Card>
