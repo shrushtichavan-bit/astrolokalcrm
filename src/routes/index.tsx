@@ -61,6 +61,7 @@ function Dashboard() {
     queryKey: ["my-leads"],
     queryFn: () => fetchLeads(),
     staleTime: 30_000,
+    placeholderData: (prev) => prev,
   });
 
   function prefetchLead(id: string) {
