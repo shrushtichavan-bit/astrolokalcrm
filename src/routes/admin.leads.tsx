@@ -130,6 +130,7 @@ function AllLeadsPage() {
                 <th className="px-2 py-2 text-left">Lead Date</th>
                 <th className="px-2 py-2 text-left">Lead Name</th>
                 <th className="px-2 py-2 text-left">Caller</th>
+                <th className="px-2 py-2 text-left">Assigned To</th>
                 <th className="px-2 py-2 text-left">A1 Status</th>
                 <th className="px-2 py-2 text-left">A1 Time</th>
                 <th className="px-2 py-2 text-left">A2 Status</th>
