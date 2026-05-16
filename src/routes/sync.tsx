@@ -29,12 +29,22 @@ function fmtTime(iso: string | null): string {
   });
 }
 
-/** All syncs run on a wall-clock cadence every 15 minutes (:00, :15, :30, :45). */
-function nextSyncIso(now: Date = new Date()): string {
+/** Each sync runs on its own staggered 15-minute cycle (offset in minutes). */
+const OFFSETS: Record<Key, number> = {
+  leads: 0,
+  config: 3,
+  credentials: 6,
+  experts: 9,
+  dump: 12,
+};
+function nextSyncIso(offset: number, now: Date = new Date()): string {
   const d = new Date(now);
+  d.setSeconds(0, 0);
   const m = d.getMinutes();
-  const add = 15 - (m % 15);
-  d.setMinutes(m + add, 0, 0);
+  // Find next minute m' >= current where m' % 15 === offset
+  let add = (offset - (m % 15) + 15) % 15;
+  if (add === 0 && now.getTime() >= d.getTime()) add = 15;
+  d.setMinutes(m + add);
   return d.toISOString();
 }
 
@@ -71,7 +81,7 @@ function SyncPage() {
     const t = setInterval(() => setTick((n) => n + 1), 30_000);
     return () => clearInterval(t);
   }, []);
-  const nextSync = nextSyncIso();
+  
 
   async function run(key: Key, label: string) {
     setBusy(key);
@@ -127,7 +137,7 @@ function SyncPage() {
                     Last synced: <span className="text-[#1A1A1A]">{fmtTime(lastRun[it.key])}</span>
                   </div>
                   <div className="text-[13px] text-[#6B6B6B]">
-                    Next sync: <span className="text-[#1A1A1A]">{fmtTime(nextSync)}</span>
+                    Next sync: <span className="text-[#1A1A1A]">{fmtTime(nextSyncIso(OFFSETS[it.key]))}</span>
                   </div>
                 </div>
                 <button
