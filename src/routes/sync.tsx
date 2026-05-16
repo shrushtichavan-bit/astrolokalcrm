@@ -29,6 +29,15 @@ function fmtTime(iso: string | null): string {
   });
 }
 
+/** All syncs run on a wall-clock cadence every 15 minutes (:00, :15, :30, :45). */
+function nextSyncIso(now: Date = new Date()): string {
+  const d = new Date(now);
+  const m = d.getMinutes();
+  const add = 15 - (m % 15);
+  d.setMinutes(m + add, 0, 0);
+  return d.toISOString();
+}
+
 function SyncPage() {
   const { user } = Route.useLoaderData();
   const fns: Record<Key, () => Promise<unknown>> = {
@@ -56,6 +65,14 @@ function SyncPage() {
     }
   }, []);
 
+  // Tick every 30s so the "Next sync" label stays accurate.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 30_000);
+    return () => clearInterval(t);
+  }, []);
+  const nextSync = nextSyncIso();
+
   async function run(key: Key, label: string) {
     setBusy(key);
     try {
@@ -81,7 +98,7 @@ function SyncPage() {
     { key: "config", label: "Sync Config", desc: "Round settings, passing marks, questions, pools." },
     { key: "credentials", label: "Sync Team", desc: "Pull team members and their passwords." },
     { key: "experts", label: "Sync Active Experts", desc: "Mark linked profiles active." },
-    { key: "dump", label: "Write Lead Dump", desc: "Rebuild the lead_dump tab with every lead's current funnel state.", cta: "Write" },
+    { key: "dump", label: "Write Lead Dump", desc: "Upsert every lead's current funnel state into the lead_dump tab.", cta: "Write" },
   ];
 
   return (
@@ -90,7 +107,7 @@ function SyncPage() {
         <div>
           <h1 className="text-[28px] font-bold tracking-tight text-[#1A1A1A]">Sync</h1>
           <p className="mt-1 text-sm text-[#6B6B6B]">
-            Pull the latest data from your Google Sheets.
+            All syncs run automatically every 15 minutes. Use the buttons below only when you need an immediate refresh.
           </p>
         </div>
 
@@ -109,6 +126,9 @@ function SyncPage() {
                   <div className="mt-1 text-[13px] text-[#6B6B6B]">
                     Last synced: <span className="text-[#1A1A1A]">{fmtTime(lastRun[it.key])}</span>
                   </div>
+                  <div className="text-[13px] text-[#6B6B6B]">
+                    Next sync: <span className="text-[#1A1A1A]">{fmtTime(nextSync)}</span>
+                  </div>
                 </div>
                 <button
                   onClick={() => run(it.key, it.label)}
@@ -123,7 +143,7 @@ function SyncPage() {
         </div>
 
         <p className="text-[13px] text-[#6B6B6B]">
-          Sync leads every day after the admin uploads the new leads sheet.
+          Background sync runs every 15 minutes for all five jobs. You don't need to click anything — these buttons just force an immediate refresh.
         </p>
       </div>
     </AppShell>
