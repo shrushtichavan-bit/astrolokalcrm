@@ -638,19 +638,24 @@ function RoundActions({ data, round, onChanged }: { data: LeadData; round: numbe
         <Textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={3} className="mt-2" />
       </div>
 
-      {!isLastRound && (
-        <div className="mt-5">
-          <Label>Pass to next round person (Round {round + 1})</Label>
-          <Select value={nextOwner} onValueChange={setNextOwner}>
-            <SelectTrigger className="mt-2 h-11"><SelectValue placeholder="Select a person…" /></SelectTrigger>
-            <SelectContent>
-              {(poolQ.data?.members ?? []).map((m) => (
-                <SelectItem key={m} value={m}>{m}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
+      <div className="mt-5">
+        <Label>
+          {isLastRound
+            ? "If they pass, who creates their expert profile?"
+            : `If they pass, who conducts Round ${round + 1}?`}
+        </Label>
+        <Select value={nextOwner} onValueChange={setNextOwner}>
+          <SelectTrigger className="mt-2 h-11"><SelectValue placeholder="Select a person…" /></SelectTrigger>
+          <SelectContent>
+            {(poolQ.data?.members ?? []).map((m) => (
+              <SelectItem key={m} value={m}>{m}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          Only used if they pass this round. Ignored if they fail.
+        </p>
+      </div>
 
       {questions.length > 0 && (
         <div className="mt-6">
