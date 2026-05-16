@@ -20,6 +20,7 @@ import { Route as AdminPeopleRouteImport } from './routes/admin.people'
 import { Route as AdminLeadsRouteImport } from './routes/admin.leads'
 import { Route as ApiAuthLoginRouteImport } from './routes/api/auth/login'
 import { Route as ApiPublicHooksSyncExpertsRouteImport } from './routes/api/public/hooks/sync-experts'
+import { Route as ApiPublicHooksRebuildLeadDumpRouteImport } from './routes/api/public/hooks/rebuild-lead-dump'
 import { Route as ApiPublicHooksBootstrapCredentialsRouteImport } from './routes/api/public/hooks/bootstrap-credentials'
 
 const SyncRoute = SyncRouteImport.update({
@@ -78,6 +79,12 @@ const ApiPublicHooksSyncExpertsRoute =
     path: '/api/public/hooks/sync-experts',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicHooksRebuildLeadDumpRoute =
+  ApiPublicHooksRebuildLeadDumpRouteImport.update({
+    id: '/api/public/hooks/rebuild-lead-dump',
+    path: '/api/public/hooks/rebuild-lead-dump',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicHooksBootstrapCredentialsRoute =
   ApiPublicHooksBootstrapCredentialsRouteImport.update({
     id: '/api/public/hooks/bootstrap-credentials',
@@ -97,6 +104,7 @@ export interface FileRoutesByFullPath {
   '/admin/': typeof AdminIndexRoute
   '/api/auth/login': typeof ApiAuthLoginRoute
   '/api/public/hooks/bootstrap-credentials': typeof ApiPublicHooksBootstrapCredentialsRoute
+  '/api/public/hooks/rebuild-lead-dump': typeof ApiPublicHooksRebuildLeadDumpRoute
   '/api/public/hooks/sync-experts': typeof ApiPublicHooksSyncExpertsRoute
 }
 export interface FileRoutesByTo {
@@ -110,6 +118,7 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminIndexRoute
   '/api/auth/login': typeof ApiAuthLoginRoute
   '/api/public/hooks/bootstrap-credentials': typeof ApiPublicHooksBootstrapCredentialsRoute
+  '/api/public/hooks/rebuild-lead-dump': typeof ApiPublicHooksRebuildLeadDumpRoute
   '/api/public/hooks/sync-experts': typeof ApiPublicHooksSyncExpertsRoute
 }
 export interface FileRoutesById {
@@ -125,6 +134,7 @@ export interface FileRoutesById {
   '/admin/': typeof AdminIndexRoute
   '/api/auth/login': typeof ApiAuthLoginRoute
   '/api/public/hooks/bootstrap-credentials': typeof ApiPublicHooksBootstrapCredentialsRoute
+  '/api/public/hooks/rebuild-lead-dump': typeof ApiPublicHooksRebuildLeadDumpRoute
   '/api/public/hooks/sync-experts': typeof ApiPublicHooksSyncExpertsRoute
 }
 export interface FileRouteTypes {
@@ -141,6 +151,7 @@ export interface FileRouteTypes {
     | '/admin/'
     | '/api/auth/login'
     | '/api/public/hooks/bootstrap-credentials'
+    | '/api/public/hooks/rebuild-lead-dump'
     | '/api/public/hooks/sync-experts'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -154,6 +165,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/api/auth/login'
     | '/api/public/hooks/bootstrap-credentials'
+    | '/api/public/hooks/rebuild-lead-dump'
     | '/api/public/hooks/sync-experts'
   id:
     | '__root__'
@@ -168,6 +180,7 @@ export interface FileRouteTypes {
     | '/admin/'
     | '/api/auth/login'
     | '/api/public/hooks/bootstrap-credentials'
+    | '/api/public/hooks/rebuild-lead-dump'
     | '/api/public/hooks/sync-experts'
   fileRoutesById: FileRoutesById
 }
@@ -179,6 +192,7 @@ export interface RootRouteChildren {
   LeadsIdRoute: typeof LeadsIdRoute
   ApiAuthLoginRoute: typeof ApiAuthLoginRoute
   ApiPublicHooksBootstrapCredentialsRoute: typeof ApiPublicHooksBootstrapCredentialsRoute
+  ApiPublicHooksRebuildLeadDumpRoute: typeof ApiPublicHooksRebuildLeadDumpRoute
   ApiPublicHooksSyncExpertsRoute: typeof ApiPublicHooksSyncExpertsRoute
 }
 
@@ -261,6 +275,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicHooksSyncExpertsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/hooks/rebuild-lead-dump': {
+      id: '/api/public/hooks/rebuild-lead-dump'
+      path: '/api/public/hooks/rebuild-lead-dump'
+      fullPath: '/api/public/hooks/rebuild-lead-dump'
+      preLoaderRoute: typeof ApiPublicHooksRebuildLeadDumpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/hooks/bootstrap-credentials': {
       id: '/api/public/hooks/bootstrap-credentials'
       path: '/api/public/hooks/bootstrap-credentials'
@@ -296,8 +317,19 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAuthLoginRoute: ApiAuthLoginRoute,
   ApiPublicHooksBootstrapCredentialsRoute:
     ApiPublicHooksBootstrapCredentialsRoute,
+  ApiPublicHooksRebuildLeadDumpRoute: ApiPublicHooksRebuildLeadDumpRoute,
   ApiPublicHooksSyncExpertsRoute: ApiPublicHooksSyncExpertsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
