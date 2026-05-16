@@ -130,6 +130,7 @@ function AllLeadsPage() {
                 <th className="px-2 py-2 text-left">Lead Date</th>
                 <th className="px-2 py-2 text-left">Lead Name</th>
                 <th className="px-2 py-2 text-left">Caller</th>
+                <th className="px-2 py-2 text-left">Assigned To</th>
                 <th className="px-2 py-2 text-left">A1 Status</th>
                 <th className="px-2 py-2 text-left">A1 Time</th>
                 <th className="px-2 py-2 text-left">A2 Status</th>
@@ -152,6 +153,7 @@ function AllLeadsPage() {
                   <td className="px-2 py-2 text-muted-foreground">{r.lead_date ?? "—"}</td>
                   <td className="px-2 py-2">{r.name}</td>
                   <td className="px-2 py-2 text-xs text-muted-foreground">{r.caller}</td>
+                  <td className="px-2 py-2 text-xs text-muted-foreground">{r.owner}</td>
                   <td className="px-2 py-2">{r.a1}</td>
                   <td className="px-2 py-2 text-xs text-muted-foreground">{r.a1_at ? new Date(r.a1_at).toLocaleString() : "—"}</td>
                   <td className="px-2 py-2">{r.a2}</td>
