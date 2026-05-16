@@ -98,7 +98,7 @@ function SyncPage() {
     { key: "config", label: "Sync Config", desc: "Round settings, passing marks, questions, pools." },
     { key: "credentials", label: "Sync Team", desc: "Pull team members and their passwords." },
     { key: "experts", label: "Sync Active Experts", desc: "Mark linked profiles active." },
-    { key: "dump", label: "Write Lead Dump", desc: "Rebuild the lead_dump tab with every lead's current funnel state.", cta: "Write" },
+    { key: "dump", label: "Write Lead Dump", desc: "Upsert every lead's current funnel state into the lead_dump tab.", cta: "Write" },
   ];
 
   return (
@@ -107,7 +107,7 @@ function SyncPage() {
         <div>
           <h1 className="text-[28px] font-bold tracking-tight text-[#1A1A1A]">Sync</h1>
           <p className="mt-1 text-sm text-[#6B6B6B]">
-            Pull the latest data from your Google Sheets.
+            All syncs run automatically every 15 minutes. Use the buttons below only when you need an immediate refresh.
           </p>
         </div>
 
