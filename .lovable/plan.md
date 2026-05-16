@@ -1,30 +1,58 @@
-## Why login appears to vanish
+# Admin Panel + Pool-Based Rounds
 
-The server is doing its job: `/api/auth/login` validates the password, sets an httpOnly session cookie, and returns 200. On success the page navigates to `/`, the dashboard runs `getMe()`, finds no session, and bounces you back to `/login`. The form re-mounts blank, which looks like "the page vanished."
+## 1. Database changes (single migration)
 
-The actual blocker is the Lovable preview environment: the app runs inside a cross-origin iframe, and modern browsers treat cookies set from inside that iframe as third-party. The Set-Cookie from `/api/auth/login` never sticks, so the next request looks unauthenticated. (This will work on the **published URL** today, but we should fix it so the preview is usable too.)
+- `ALTER TABLE leads ADD COLUMN lead_date DATE;`
+- No other schema changes — existing `stage_pools`, `interview_rounds`, `call_attempts`, `calling_status`, `expert_profiles`, `round_config`, `users` already support everything needed.
 
-## Fix: switch from cookie-only sessions to a Bearer-token session
+## 2. Sync update (`src/lib/sync.functions.ts` / `src/lib/sheets.server.ts`)
 
-Same JWT, same 12h expiry, same bcrypt-hashed credentials — only the transport changes. Token still lives in an httpOnly cookie when it works (published site), but we add a localStorage fallback that the client attaches as `Authorization: Bearer <token>` on every server-fn call. This is the same pattern the Supabase auth-attacher already uses on this stack.
+- Read column G as `lead_date`; parse `DD/MM/YYYY` or `YYYY-MM-DD` → ISO date.
+- Upsert into `leads.lead_date` on every leads sync.
 
-### Changes
+## 3. Pool-based round logic audit (`src/lib/leads.functions.ts`, `src/lib/lead-helpers.server.ts`)
 
-1. **`/api/auth/login` (POST)** — keep the Set-Cookie response, but also return the JWT in the JSON body: `{ user, token }`.
-2. **`src/lib/auth.server.ts`** — `getSessionUser()` reads the token from the cookie **or** the `Authorization: Bearer ...` header (whichever is present). No other logic changes.
-3. **New `src/lib/session-attacher.ts`** — a TanStack `functionMiddleware` (mirrors `attachSupabaseAuth`) that, on the client, reads the token from `localStorage` and adds `Authorization: Bearer <token>` to every server-fn request.
-4. **`src/start.ts`** — register the new middleware in `functionMiddleware: [...]` so every `createServerFn` call carries the header automatically. (No edits to existing Supabase wiring.)
-5. **`src/routes/login.tsx`** — on a successful login response, write `data.token` to `localStorage["astrolokal_session"]` before navigating. Also surface the server's error text inline so a future failure isn't silent.
-6. **`src/components/AppShell.tsx`** — on logout, clear `localStorage["astrolokal_session"]` in addition to calling `DELETE /api/auth/login`.
-7. **Login form UX polish** — keep the email value on failure, show a clear inline error, and disable the button while the request is in flight (it already is, but the error path needs to render reliably).
+- Remove any `user.role === 'kam'` gates around round actions. Eligibility for any round N is purely: `exists(stage_pools where stage='round_N' and eligible_email = me)`.
+- Same for `expert_creation` pool — not role-based.
+- Calling stage remains owner-based (`leads.assigned_to_email` / `current_owner_email`).
+- Admin role only used to gate `/admin/*` routes.
 
-Nothing about RLS, business rules, sync, or the cron changes. The existing custom JWT auth model stays the same — we're just adding a second way to carry the token so the iframe preview works.
+## 4. Server functions for admin (`src/lib/admin.functions.ts`)
 
-### Verification after the change
+All protected by `requireAdmin()` helper that calls `requireRole('admin')` (extend the `Role` type to include `'admin'` in `src/lib/auth.server.ts`).
 
-1. Log in as `bootstrap@astrolokal.com` / `Bootstrap@123` in the preview → land on the dashboard.
-2. Open Sync → run "Sync Credentials" → real users from the sheet appear.
-3. Log out, log back in as a real user (e.g. `ravi@astrolokal.com`).
-4. Confirm the audit trail still records actions under the right email.
+- `getFunnel({ from?, to?, person? })` → reads `round_config.num_rounds`, returns rows: Leads Uploaded, Attempt Made, Connected, Round 1..N Done, Passed, Profile Created, Active. Filter leads by `lead_date` range.
+- `getCallers({ from?, to? })` → per `assigned_to_email`: assigned/A1/A2/A3/connected counts + conversion.
+- `getRoundWorkers({ round, from?, to? })` → per email in `stage_pools where stage='round_N'`: assigned (rounds started)/done (submitted)/pass rate.
+- `getCreationAgents({ from?, to? })` → per email in `stage_pools where stage='expert_creation'`: assigned/created/active.
+- `getTAT({ from?, to? })` → SQL aggregates (avg/min/max in hours) for each stage transition; round rows dynamic by `num_rounds`.
+- `listAllLeads({ from?, to?, person?, stage?, status?, verdict?, sort? })` → flattened rows with A1/A2/A3 outcomes + per-round verdicts + computed display stage.
+- `exportLeadsCsv(filters)` → returns CSV string.
 
-Once that works end-to-end, you can delete the bootstrap row.
+All queries via `supabaseAdmin`. Cache layer is optional; skip in v1 (admin section is low-traffic).
+
+## 5. Admin UI routes
+
+- `src/routes/admin.tsx` — layout with tab nav + `<Outlet/>`; `beforeLoad` redirects non-admin to `/`.
+- `src/routes/admin.index.tsx` — Funnel Overview (default).
+- `src/routes/admin.people.tsx` — Callers + per-round tables (dynamic) + Creation agents.
+- `src/routes/admin.tat.tsx` — TAT table with red-highlight thresholds.
+- `src/routes/admin.leads.tsx` — All Leads table with filters, CSV export button.
+
+Each tab has date range + person filters where applicable. Row click → drawer (use existing `Dialog` or `Sheet` component) listing leads.
+
+## 6. Dashboard updates (`src/routes/index.tsx`, `src/routes/leads.$id.tsx`)
+
+- Lead cards: small grey `lead_date` text.
+- Dashboard: From/To date range filter on `lead_date`.
+
+## 7. Nav (`src/components/AppShell.tsx`)
+
+- Show "Admin" link only when `me.role === 'admin'`.
+
+## Notes
+
+- "admin" role must exist in `users.role`. Document that admins are seeded by setting role='admin' in the credentials sheet.
+- All Date math in SQL via `EXTRACT(EPOCH FROM ...)`.
+- Use `Promise.all` in admin handlers for parallelism.
+- Dynamically generate round rows in funnel/TAT/people from `round_config.num_rounds` — no hardcoding.
