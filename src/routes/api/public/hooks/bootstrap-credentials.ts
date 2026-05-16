@@ -5,7 +5,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { readTab, SHEETS_TABS } from "@/lib/sheets.server";
 import { hashPassword } from "@/lib/auth.server";
 
-
+const VALID_ROLES = new Set(["lma", "kam", "sme", "admin"]);
 
 export const Route = createFileRoute("/api/public/hooks/bootstrap-credentials")({
   server: {
@@ -27,9 +27,13 @@ export const Route = createFileRoute("/api/public/hooks/bootstrap-credentials")(
           const name = r.name?.trim();
           const email = r.email?.trim().toLowerCase();
           const password = r.password ?? "";
-          const role = r.role?.trim().toLowerCase() || "user";
-          if (!name || !email || !password) {
+          const role = r.role?.trim().toLowerCase();
+          if (!name || !email || !password || !role) {
             errors.push(`skip ${email || "(blank)"}: missing fields`);
+            continue;
+          }
+          if (!VALID_ROLES.has(role)) {
+            errors.push(`${email}: invalid role "${role}"`);
             continue;
           }
           const password_hash = await hashPassword(password);
