@@ -11,8 +11,13 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SyncRouteImport } from './routes/sync'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as LeadsIdRouteImport } from './routes/leads.$id'
+import { Route as AdminTatRouteImport } from './routes/admin.tat'
+import { Route as AdminPeopleRouteImport } from './routes/admin.people'
+import { Route as AdminLeadsRouteImport } from './routes/admin.leads'
 import { Route as ApiAuthLoginRouteImport } from './routes/api/auth/login'
 import { Route as ApiPublicHooksSyncExpertsRouteImport } from './routes/api/public/hooks/sync-experts'
 import { Route as ApiPublicHooksBootstrapCredentialsRouteImport } from './routes/api/public/hooks/bootstrap-credentials'
@@ -27,15 +32,40 @@ const LoginRoute = LoginRouteImport.update({
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminIndexRoute = AdminIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AdminRoute,
+} as any)
 const LeadsIdRoute = LeadsIdRouteImport.update({
   id: '/leads/$id',
   path: '/leads/$id',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AdminTatRoute = AdminTatRouteImport.update({
+  id: '/tat',
+  path: '/tat',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminPeopleRoute = AdminPeopleRouteImport.update({
+  id: '/people',
+  path: '/people',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminLeadsRoute = AdminLeadsRouteImport.update({
+  id: '/leads',
+  path: '/leads',
+  getParentRoute: () => AdminRoute,
 } as any)
 const ApiAuthLoginRoute = ApiAuthLoginRouteImport.update({
   id: '/api/auth/login',
@@ -57,9 +87,14 @@ const ApiPublicHooksBootstrapCredentialsRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteWithChildren
   '/login': typeof LoginRoute
   '/sync': typeof SyncRoute
+  '/admin/leads': typeof AdminLeadsRoute
+  '/admin/people': typeof AdminPeopleRoute
+  '/admin/tat': typeof AdminTatRoute
   '/leads/$id': typeof LeadsIdRoute
+  '/admin/': typeof AdminIndexRoute
   '/api/auth/login': typeof ApiAuthLoginRoute
   '/api/public/hooks/bootstrap-credentials': typeof ApiPublicHooksBootstrapCredentialsRoute
   '/api/public/hooks/sync-experts': typeof ApiPublicHooksSyncExpertsRoute
@@ -68,7 +103,11 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/sync': typeof SyncRoute
+  '/admin/leads': typeof AdminLeadsRoute
+  '/admin/people': typeof AdminPeopleRoute
+  '/admin/tat': typeof AdminTatRoute
   '/leads/$id': typeof LeadsIdRoute
+  '/admin': typeof AdminIndexRoute
   '/api/auth/login': typeof ApiAuthLoginRoute
   '/api/public/hooks/bootstrap-credentials': typeof ApiPublicHooksBootstrapCredentialsRoute
   '/api/public/hooks/sync-experts': typeof ApiPublicHooksSyncExpertsRoute
@@ -76,9 +115,14 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteWithChildren
   '/login': typeof LoginRoute
   '/sync': typeof SyncRoute
+  '/admin/leads': typeof AdminLeadsRoute
+  '/admin/people': typeof AdminPeopleRoute
+  '/admin/tat': typeof AdminTatRoute
   '/leads/$id': typeof LeadsIdRoute
+  '/admin/': typeof AdminIndexRoute
   '/api/auth/login': typeof ApiAuthLoginRoute
   '/api/public/hooks/bootstrap-credentials': typeof ApiPublicHooksBootstrapCredentialsRoute
   '/api/public/hooks/sync-experts': typeof ApiPublicHooksSyncExpertsRoute
@@ -87,9 +131,14 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/admin'
     | '/login'
     | '/sync'
+    | '/admin/leads'
+    | '/admin/people'
+    | '/admin/tat'
     | '/leads/$id'
+    | '/admin/'
     | '/api/auth/login'
     | '/api/public/hooks/bootstrap-credentials'
     | '/api/public/hooks/sync-experts'
@@ -98,16 +147,25 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/sync'
+    | '/admin/leads'
+    | '/admin/people'
+    | '/admin/tat'
     | '/leads/$id'
+    | '/admin'
     | '/api/auth/login'
     | '/api/public/hooks/bootstrap-credentials'
     | '/api/public/hooks/sync-experts'
   id:
     | '__root__'
     | '/'
+    | '/admin'
     | '/login'
     | '/sync'
+    | '/admin/leads'
+    | '/admin/people'
+    | '/admin/tat'
     | '/leads/$id'
+    | '/admin/'
     | '/api/auth/login'
     | '/api/public/hooks/bootstrap-credentials'
     | '/api/public/hooks/sync-experts'
@@ -115,6 +173,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRouteWithChildren
   LoginRoute: typeof LoginRoute
   SyncRoute: typeof SyncRoute
   LeadsIdRoute: typeof LeadsIdRoute
@@ -139,6 +198,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -146,12 +212,40 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/': {
+      id: '/admin/'
+      path: '/'
+      fullPath: '/admin/'
+      preLoaderRoute: typeof AdminIndexRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/leads/$id': {
       id: '/leads/$id'
       path: '/leads/$id'
       fullPath: '/leads/$id'
       preLoaderRoute: typeof LeadsIdRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/admin/tat': {
+      id: '/admin/tat'
+      path: '/tat'
+      fullPath: '/admin/tat'
+      preLoaderRoute: typeof AdminTatRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/people': {
+      id: '/admin/people'
+      path: '/people'
+      fullPath: '/admin/people'
+      preLoaderRoute: typeof AdminPeopleRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/leads': {
+      id: '/admin/leads'
+      path: '/leads'
+      fullPath: '/admin/leads'
+      preLoaderRoute: typeof AdminLeadsRouteImport
+      parentRoute: typeof AdminRoute
     }
     '/api/auth/login': {
       id: '/api/auth/login'
@@ -177,8 +271,25 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface AdminRouteChildren {
+  AdminLeadsRoute: typeof AdminLeadsRoute
+  AdminPeopleRoute: typeof AdminPeopleRoute
+  AdminTatRoute: typeof AdminTatRoute
+  AdminIndexRoute: typeof AdminIndexRoute
+}
+
+const AdminRouteChildren: AdminRouteChildren = {
+  AdminLeadsRoute: AdminLeadsRoute,
+  AdminPeopleRoute: AdminPeopleRoute,
+  AdminTatRoute: AdminTatRoute,
+  AdminIndexRoute: AdminIndexRoute,
+}
+
+const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminRoute: AdminRouteWithChildren,
   LoginRoute: LoginRoute,
   SyncRoute: SyncRoute,
   LeadsIdRoute: LeadsIdRoute,

@@ -42,6 +42,8 @@ function Dashboard() {
     placeholderData: (prev) => prev,
   });
   const [doneOpen, setDoneOpen] = useState(false);
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
 
   function prefetchLead(id: string) {
     qc.prefetchQuery({
@@ -51,10 +53,21 @@ function Dashboard() {
     });
   }
 
-  const active = leadsQ.data?.active ?? [];
+  const activeAll = leadsQ.data?.active ?? [];
   const done = leadsQ.data?.done ?? [];
   const summary = leadsQ.data?.summary;
   const numRounds = leadsQ.data?.cfg.num_rounds ?? 2;
+
+  const active = useMemo(() => {
+    if (!fromDate && !toDate) return activeAll;
+    return activeAll.filter((l) => {
+      const d = l.lead_date;
+      if (!d) return false;
+      if (fromDate && d < fromDate) return false;
+      if (toDate && d > toDate) return false;
+      return true;
+    });
+  }, [activeAll, fromDate, toDate]);
 
   const { grouped, bucketOrder } = useMemo(() => {
     const g: Record<string, typeof active> = {};

@@ -30,6 +30,9 @@ export function AppShell({
             <nav className="flex gap-4 text-sm text-muted-foreground">
               <Link to="/" activeProps={{ className: "text-foreground font-medium" }}>Dashboard</Link>
               <Link to="/sync" activeProps={{ className: "text-foreground font-medium" }}>Sync</Link>
+              {user.role === "admin" && (
+                <Link to="/admin" activeProps={{ className: "text-foreground font-medium" }}>Admin</Link>
+              )}
             </nav>
           </div>
           <div className="flex items-center gap-3">
