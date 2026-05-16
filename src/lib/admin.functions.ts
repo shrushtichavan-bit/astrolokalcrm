@@ -539,15 +539,16 @@ async function queryLeadsPage(f: AllLeadsFilterT, limit: number) {
   const sort = sortToColumn(f.sort ?? "lead_date");
 
   // Build base query (for count and for page)
-  function applyFilters<T extends ReturnType<typeof supabaseAdmin.from<"leads">>["select"]>(
-    qb: ReturnType<T>,
-  ) {
+  // Using `any` here is acceptable: the Supabase query builder type is
+  // self-referential and chaining the same filters over differently-typed
+  // builders (count vs select) is awkward to express otherwise.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function applyFilters(qb: any): any {
     let q = qb;
     if (f.from) q = q.gte("lead_date", f.from);
     if (f.to) q = q.lte("lead_date", f.to);
     if (f.stage) q = q.eq("current_stage", f.stage);
     if (joinIds) {
-      // Supabase URL length limit safety: chunk to 1000 ids
       const ids = Array.from(joinIds);
       q = q.in("id", ids.slice(0, 1000));
     }
