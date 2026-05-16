@@ -687,6 +687,7 @@ export const submitRound = createServerFn({ method: "POST" })
         total_score: total,
         reason: `Score ${total} below passing ${thisRoundPass} for round ${data.round_number}`,
       });
+      upsertLeadDumpInBackground(lead.id);
       return { ok: true, total_score: total, verdict: "failed" as const };
     }
 
@@ -711,6 +712,7 @@ export const submitRound = createServerFn({ method: "POST" })
         round_number: data.round_number,
         total_score: total,
       });
+      upsertLeadDumpInBackground(lead.id);
       return { ok: true, total_score: total, verdict: "passed" as const };
     }
 
@@ -725,6 +727,7 @@ export const submitRound = createServerFn({ method: "POST" })
     const completed = doneRounds ?? [];
     if (completed.length < requiredVerdictRounds) {
       // Should not happen on the final round, but guard.
+      upsertLeadDumpInBackground(lead.id);
       return { ok: true, total_score: total, verdict: null };
     }
     let passed = true;
@@ -752,12 +755,14 @@ export const submitRound = createServerFn({ method: "POST" })
         verdict: "passed",
         total_score: total,
       });
+      upsertLeadDumpInBackground(lead.id);
       return { ok: true, total_score: total, verdict: "passed" as const };
     } else {
       await transitionLead(lead.id, "failed", lead.current_owner_email, u.email, {
         verdict: "failed",
         total_score: total,
       });
+      upsertLeadDumpInBackground(lead.id);
       return { ok: true, total_score: total, verdict: "failed" as const };
     }
   });
