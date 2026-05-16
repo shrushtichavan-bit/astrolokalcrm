@@ -110,7 +110,7 @@ export const getPool = createServerFn({ method: "GET" })
 
 /** Active expert IDs from the latest sync (for Expert Creation Agent dropdown). */
 export const listActiveExpertIds = createServerFn({ method: "GET" }).handler(async () => {
-  await requireRole("expert_creation_agent");
+  await requireUser();
   // Show all known expert_profiles + raw expert_id list. To populate a dropdown
   // of POSSIBLE expert_ids we need a stable source; we use what's been synced
   // into expert_profiles.is_active. For initial linking we expose all distinct
@@ -152,7 +152,7 @@ export const logCallOutcome = createServerFn({ method: "POST" })
         .parse(i),
   )
   .handler(async ({ data }) => {
-    const u = await requireRole("telecaller");
+    const u = await requireUser();
     const lead = await loadLeadOwned(data.lead_id, u.email);
     if (lead.current_stage !== "calling_pending")
       throw new Error("Lead is not in calling stage");
@@ -247,7 +247,7 @@ export const logCallAttempt = createServerFn({ method: "POST" })
       .parse(i),
   )
   .handler(async ({ data }) => {
-    const u = await requireRole("telecaller");
+    const u = await requireUser();
     const lead = await loadLeadOwned(data.lead_id, u.email);
     if (lead.current_stage !== "calling_pending") throw new Error("Lead is not in calling stage");
 
@@ -314,7 +314,7 @@ export const setCallingStatus = createServerFn({ method: "POST" })
         .parse(i),
   )
   .handler(async ({ data }) => {
-    const u = await requireRole("telecaller");
+    const u = await requireUser();
     const lead = await loadLeadOwned(data.lead_id, u.email);
     if (lead.current_stage !== "calling_pending") throw new Error("Lead is not in calling stage");
 
@@ -379,7 +379,7 @@ export const startRound = createServerFn({ method: "POST" })
       .parse(i),
   )
   .handler(async ({ data }) => {
-    const u = await requireRole("kam");
+    const u = await requireUser();
     const lead = await loadLeadOwned(data.lead_id, u.email);
     const expectedStage = `round_${data.round_number}_pending`;
     if (lead.current_stage !== expectedStage)
@@ -421,7 +421,7 @@ export const submitRound = createServerFn({ method: "POST" })
         .parse(i),
   )
   .handler(async ({ data }) => {
-    const u = await requireRole("kam");
+    const u = await requireUser();
     const lead = await loadLeadOwned(data.lead_id, u.email);
     const expectedStage = `round_${data.round_number}_pending`;
     if (lead.current_stage !== expectedStage)
@@ -564,7 +564,7 @@ export const linkExpertProfile = createServerFn({ method: "POST" })
       .parse(i),
   )
   .handler(async ({ data }) => {
-    const u = await requireRole("expert_creation_agent");
+    const u = await requireUser();
     const lead = await loadLeadOwned(data.lead_id, u.email);
     if (lead.current_stage !== "profile_creation_pending")
       throw new Error("Lead is not in profile creation stage");
