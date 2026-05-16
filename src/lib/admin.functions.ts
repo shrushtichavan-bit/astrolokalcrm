@@ -597,19 +597,22 @@ export const listAllLeads = createServerFn({ method: "POST" })
   .inputValidator((i: AllLeadsFilterT) => AllLeadsFilter.parse(i))
   .handler(async ({ data: f }) => {
     await requireRole("admin");
-    const rows = await buildAllLeadsRows(f);
-    return { rows };
+    const { rows, num_rounds } = await buildAllLeadsRows(f);
+    return { rows, num_rounds };
   });
 
 export const exportLeadsCsv = createServerFn({ method: "POST" })
   .inputValidator((i: AllLeadsFilterT) => AllLeadsFilter.parse(i))
   .handler(async ({ data: f }) => {
     await requireRole("admin");
-    const rows = await buildAllLeadsRows(f);
+    const { rows, num_rounds } = await buildAllLeadsRows(f);
+    const roundHeaders = Array.from({ length: num_rounds }, (_, i) => `round_${i + 1}_status`);
     const header = [
-      "lead_id", "name", "contact", "lead_date", "priority", "caller",
-      "attempt_1", "attempt_2", "attempt_3", "rounds", "stage", "owner",
-      "calling_status", "verdict", "updated_at",
+      "lead_id", "lead_date", "name", "caller",
+      "a1_status", "a2_status", "a3_status",
+      "final_calling_status",
+      ...roundHeaders,
+      "profile_creation_status", "active_status",
     ];
     const esc = (v: unknown) => {
       const s = v == null ? "" : String(v);
@@ -617,10 +620,13 @@ export const exportLeadsCsv = createServerFn({ method: "POST" })
     };
     const lines = [header.join(",")];
     for (const r of rows) {
+      const roundVals = Array.from({ length: num_rounds }, (_, i) => r.rounds_status[i + 1] ?? "—");
       lines.push([
-        r.lead_id, r.name, r.contact, r.lead_date ?? "", r.priority, r.caller,
-        r.a1, r.a2, r.a3, r.rounds, r.stage, r.owner,
-        r.status ?? "", r.verdict, r.updated_at,
+        r.lead_id, r.lead_date ?? "", r.name, r.caller,
+        r.a1, r.a2, r.a3,
+        r.final_calling_status,
+        ...roundVals,
+        r.profile_creation_status, r.active_status,
       ].map(esc).join(","));
     }
     return { csv: lines.join("\n") };
