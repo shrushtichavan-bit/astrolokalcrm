@@ -444,6 +444,7 @@ const AllLeadsFilter = z.object({
 type AllLeadsFilterT = z.infer<typeof AllLeadsFilter>;
 
 async function buildAllLeadsRows(f: AllLeadsFilterT) {
+  const numRounds = await loadNumRounds();
   let q = supabaseAdmin
     .from("leads")
     .select(
