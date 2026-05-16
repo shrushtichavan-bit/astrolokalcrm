@@ -456,7 +456,7 @@ async function buildAllLeadsRows(f: AllLeadsFilterT) {
   const { data: leads } = await q;
   let all = leads ?? [];
   const ids = all.map((l) => l.id);
-  if (ids.length === 0) return [];
+  if (ids.length === 0) return { rows: [], num_rounds: numRounds };
 
   const [{ data: atts }, { data: cs }, { data: rounds }, { data: profiles }] = await Promise.all([
     supabaseAdmin.from("call_attempts").select("*").in("lead_id", ids),
