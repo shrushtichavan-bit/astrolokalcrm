@@ -16,7 +16,7 @@ export const Route = createFileRoute("/sync")({
   component: SyncPage,
 });
 
-type Key = "leads" | "config" | "credentials" | "experts";
+type Key = "leads" | "config" | "credentials" | "experts" | "dump";
 
 function fmtTime(iso: string | null): string {
   if (!iso) return "Never";
