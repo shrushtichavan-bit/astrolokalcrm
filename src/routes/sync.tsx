@@ -36,6 +36,7 @@ function SyncPage() {
     config: useServerFn(syncConfig),
     credentials: useServerFn(syncCredentials),
     experts: useServerFn(syncActiveExperts),
+    dump: useServerFn(writeLeadDump),
   };
   const [busy, setBusy] = useState<Key | null>(null);
   const [lastRun, setLastRun] = useState<Record<Key, string | null>>({
@@ -43,12 +44,13 @@ function SyncPage() {
     config: null,
     credentials: null,
     experts: null,
+    dump: null,
   });
 
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem("sync-last-run");
-      if (raw) setLastRun(JSON.parse(raw));
+      if (raw) setLastRun({ leads: null, config: null, credentials: null, experts: null, dump: null, ...JSON.parse(raw) });
     } catch {
       /* ignore */
     }
@@ -57,7 +59,7 @@ function SyncPage() {
   async function run(key: Key, label: string) {
     setBusy(key);
     try {
-      await fns[key]();
+      const result = (await fns[key]()) as { summary?: string } | undefined;
       const now = new Date().toISOString();
       const next = { ...lastRun, [key]: now };
       setLastRun(next);
@@ -66,7 +68,7 @@ function SyncPage() {
       } catch {
         /* ignore */
       }
-      toast.success(`${label} synced.`);
+      toast.success(result?.summary ?? `${label} done.`);
     } catch (e) {
       toast.error("Something went wrong. Try again.", { description: (e as Error).message });
     } finally {
@@ -74,11 +76,12 @@ function SyncPage() {
     }
   }
 
-  const items: Array<{ key: Key; label: string; desc: string }> = [
+  const items: Array<{ key: Key; label: string; desc: string; cta?: string }> = [
     { key: "leads", label: "Sync Leads", desc: "Pull new leads from the leads sheet." },
     { key: "config", label: "Sync Config", desc: "Round settings, passing marks, questions, pools." },
     { key: "credentials", label: "Sync Team", desc: "Pull team members and their passwords." },
     { key: "experts", label: "Sync Active Experts", desc: "Mark linked profiles active." },
+    { key: "dump", label: "Write Lead Dump", desc: "Rebuild the lead_dump tab with every lead's current funnel state.", cta: "Write" },
   ];
 
   return (
