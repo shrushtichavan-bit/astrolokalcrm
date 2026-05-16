@@ -19,12 +19,14 @@ export const Route = createFileRoute("/")({
 });
 
 const STAGE_LABELS: Record<string, string> = {
-  calling_pending: "Calling Pending",
+  calling_pending_1: "Attempt 1 Pending",
+  calling_pending_2: "Attempt 2 Pending",
+  calling_pending_3: "Attempt 3 Pending",
   round_1_pending: "Round 1 Pending",
   round_2_pending: "Round 2 Pending",
   round_3_pending: "Round 3 Pending",
   round_4_pending: "Round 4 Pending",
-  profile_creation_pending: "Profile Creation Pending",
+  profile_creation_pending: "Expert Profile Creation Pending",
   profile_created: "Profile Created",
   active: "Active",
   failed: "Failed",
@@ -33,7 +35,9 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 const PENDING_STAGES = new Set([
-  "calling_pending",
+  "calling_pending_1",
+  "calling_pending_2",
+  "calling_pending_3",
   "round_1_pending",
   "round_2_pending",
   "round_3_pending",
@@ -50,7 +54,16 @@ type Lead = {
   priority: number;
   current_stage: string;
   updated_at: string;
+  attempts_logged?: number;
 };
+
+function deriveBucket(l: Lead): string {
+  if (l.current_stage === "calling_pending") {
+    const n = (l.attempts_logged ?? 0) + 1;
+    return `calling_pending_${Math.min(n, 3)}`;
+  }
+  return l.current_stage;
+}
 
 function Dashboard() {
   const { user } = Route.useLoaderData();
@@ -78,10 +91,11 @@ function Dashboard() {
     const pbs: Record<string, number> = {};
     let pending = 0;
     for (const l of leads) {
-      (g[l.current_stage] ||= []).push(l);
-      if (PENDING_STAGES.has(l.current_stage)) {
+      const bucket = deriveBucket(l);
+      (g[bucket] ||= []).push(l);
+      if (PENDING_STAGES.has(bucket)) {
         pending++;
-        pbs[l.current_stage] = (pbs[l.current_stage] ?? 0) + 1;
+        pbs[bucket] = (pbs[bucket] ?? 0) + 1;
       }
     }
     return { grouped: g, pendingCount: pending, totalCount: leads.length, pendingByStage: pbs };
