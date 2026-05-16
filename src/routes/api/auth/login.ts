@@ -44,7 +44,7 @@ export const Route = createFileRoute("/api/auth/login")({
           id: user.id,
           email: user.email,
           name: user.name,
-          role: user.role as "telecaller" | "kam" | "expert_creation_agent",
+          role: user.role as "lma" | "kam" | "sme" | "admin",
         });
         return new Response(
           JSON.stringify({
