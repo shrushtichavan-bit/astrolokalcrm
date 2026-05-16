@@ -1,0 +1,2 @@
+ALTER TABLE public.users DROP CONSTRAINT users_role_check;
+ALTER TABLE public.users ADD CONSTRAINT users_role_check CHECK (role = ANY (ARRAY['telecaller'::text, 'kam'::text, 'expert_creation_agent'::text, 'admin'::text]));
