@@ -7,7 +7,7 @@ import { listMyLeads, getLead } from "@/lib/leads.functions";
 import { AppShell } from "@/components/AppShell";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+
 
 export const Route = createFileRoute("/")({
   beforeLoad: async () => {
