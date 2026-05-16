@@ -503,7 +503,7 @@ function RoundActions({ data, round, onChanged }: { data: LeadData; round: numbe
           <Textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2} />
         </div>
         <div>
-          <Label>{round < 4 ? `Next round owner (round_${round + 1} pool)` : "Expert Creation Agent (if passed)"}</Label>
+          <Label>{isLastRound ? "Expert Creation Agent (if passed)" : `Next round owner (round_${round + 1} pool)`}</Label>
           <Select value={nextOwner} onValueChange={setNextOwner}>
             <SelectTrigger><SelectValue placeholder="Choose owner" /></SelectTrigger>
             <SelectContent>
