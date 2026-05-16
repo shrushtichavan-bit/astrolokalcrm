@@ -483,6 +483,7 @@ export const logCallAttempt = createServerFn({ method: "POST" })
       await appendAudit(lead.id, "calling_status:rnr", u.email, { auto: true });
       autoStatus = "rnr";
     }
+    upsertLeadDumpInBackground(lead.id);
     return { ok: true, auto_status: autoStatus };
   });
 
