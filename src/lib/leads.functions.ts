@@ -50,32 +50,186 @@ async function loadConfig() {
 
 // ---------- Reads ----------
 
-/** All leads currently owned by the signed-in user, grouped by stage, sorted by priority. */
+/** Dashboard payload: pending buckets, done items, summary counts, config. */
 export const listMyLeads = createServerFn({ method: "GET" }).handler(async () => {
   const u = await requireUser();
-  const { data, error } = await supabaseAdmin
+  const me = u.email;
+
+  // 1. Leads currently owned by me
+  const { data: ownedRaw, error } = await supabaseAdmin
     .from("leads")
-    .select("id, lead_id, name, contact, source, priority, current_stage, updated_at")
-    .eq("current_owner_email", u.email)
+    .select("id, lead_id, name, contact, source, priority, current_stage, current_owner_email, assigned_to_email, updated_at")
+    .eq("current_owner_email", me)
     .order("priority", { ascending: true })
     .order("updated_at", { ascending: false })
-    .limit(500);
+    .limit(1000);
   if (error) throw error;
-  const list = data ?? [];
-  const callingIds = list.filter((l) => l.current_stage === "calling_pending").map((l) => l.id);
-  const attemptsByLead = new Map<string, number>();
+  const owned = ownedRaw ?? [];
+
+  // 2. Calling attempts for owned calling leads (to derive sub-buckets and terminal state)
+  const callingIds = owned.filter((l) => l.current_stage === "calling_pending").map((l) => l.id);
+  const attemptsByLead = new Map<string, { n: number; outcome: string }[]>();
   if (callingIds.length > 0) {
     const { data: atts } = await supabaseAdmin
       .from("call_attempts")
-      .select("lead_id, attempt_number")
+      .select("lead_id, attempt_number, outcome, connected")
       .in("lead_id", callingIds);
     for (const a of atts ?? []) {
-      const prev = attemptsByLead.get(a.lead_id) ?? 0;
-      if (a.attempt_number > prev) attemptsByLead.set(a.lead_id, a.attempt_number);
+      const arr = attemptsByLead.get(a.lead_id) ?? [];
+      arr.push({
+        n: a.attempt_number,
+        outcome: a.outcome ?? (a.connected ? "connected" : "rnr"),
+      });
+      attemptsByLead.set(a.lead_id, arr);
     }
   }
+
+  // 3. Build active list — pending action by me
+  type ActiveLead = (typeof owned)[number] & { bucket: string; attempts_logged: number };
+  const active: ActiveLead[] = [];
+  for (const l of owned) {
+    let bucket = l.current_stage;
+    let attempts_logged = 0;
+    if (l.current_stage === "calling_pending") {
+      const arr = (attemptsByLead.get(l.id) ?? []).sort((a, b) => a.n - b.n);
+      attempts_logged = arr.length;
+      const last = arr[arr.length - 1];
+      // Terminal in calling? skip
+      if (last && ["connected", "junk", "not_interested"].includes(last.outcome)) continue;
+      if (arr.length >= 3) continue; // attempt 3 rnr/reconnect = terminal
+      bucket = `calling_pending_${arr.length + 1}`;
+    } else if (!l.current_stage.endsWith("_pending")) {
+      // failed / profile_created / junk / not_interested / active — skip from active
+      continue;
+    }
+    active.push({ ...l, bucket, attempts_logged });
+  }
+
+  // 4. Config
+  const { data: cfgRow } = await supabaseAdmin
+    .from("round_config")
+    .select("num_rounds, rounds_required_for_verdict")
+    .eq("id", 1)
+    .maybeSingle();
+  const numRounds = cfgRow?.num_rounds ?? 2;
+
+  // 5. Done items — leads I've touched that aren't in my pending list
+  const [
+    { data: myAttempts },
+    { data: myRounds },
+    { data: myProfiles },
+  ] = await Promise.all([
+    supabaseAdmin
+      .from("call_attempts")
+      .select("lead_id, attempt_number, outcome, connected, attempted_at")
+      .eq("attempted_by", me),
+    supabaseAdmin
+      .from("interview_rounds")
+      .select("lead_id, round_number, submitted_at, passed, next_owner_email")
+      .eq("conducted_by", me)
+      .not("submitted_at", "is", null),
+    supabaseAdmin
+      .from("expert_profiles")
+      .select("lead_id, expert_id, linked_at")
+      .eq("linked_by", me),
+  ]);
+
+  // Counts for summary bar
+  const attemptDone: Record<string, number> = { "1": 0, "2": 0, "3": 0 };
+  for (const a of myAttempts ?? []) {
+    const k = String(a.attempt_number);
+    attemptDone[k] = (attemptDone[k] ?? 0) + 1;
+  }
+  const roundDone: Record<string, number> = {};
+  for (const r of myRounds ?? []) {
+    const k = String(r.round_number);
+    roundDone[k] = (roundDone[k] ?? 0) + 1;
+  }
+  const expertDone = (myProfiles ?? []).length;
+
+  // Collect candidate done lead ids and remove ones still pending for me
+  const activeIds = new Set(active.map((l) => l.id));
+  const doneIds = new Set<string>();
+  for (const a of myAttempts ?? []) if (!activeIds.has(a.lead_id)) doneIds.add(a.lead_id);
+  for (const r of myRounds ?? []) if (!activeIds.has(r.lead_id)) doneIds.add(r.lead_id);
+  for (const p of myProfiles ?? []) if (!activeIds.has(p.lead_id)) doneIds.add(p.lead_id);
+
+  type DoneItem = { id: string; lead_id: string; name: string; label: string; at: string };
+  const done: DoneItem[] = [];
+  if (doneIds.size > 0) {
+    const idList = Array.from(doneIds);
+    const [{ data: doneLeads }, { data: statuses }] = await Promise.all([
+      supabaseAdmin
+        .from("leads")
+        .select("id, lead_id, name, current_stage, current_owner_email, updated_at")
+        .in("id", idList),
+      supabaseAdmin
+        .from("calling_status")
+        .select("lead_id, status, assigned_kam_email")
+        .in("lead_id", idList),
+    ]);
+    const statusByLead = new Map((statuses ?? []).map((s) => [s.lead_id, s]));
+    // Last round I conducted per lead
+    const myLastRound = new Map<string, (typeof myRounds extends infer T ? (T extends Array<infer U> ? U : never) : never)>();
+    for (const r of (myRounds ?? []).slice().sort((a, b) => a.round_number - b.round_number)) {
+      myLastRound.set(r.lead_id, r);
+    }
+    const profileByLead = new Map((myProfiles ?? []).map((p) => [p.lead_id, p]));
+    // Last attempt of mine per lead
+    const myLastAttempt = new Map<string, (typeof myAttempts extends infer T ? (T extends Array<infer U> ? U : never) : never)>();
+    for (const a of (myAttempts ?? []).slice().sort((a, b) => a.attempt_number - b.attempt_number)) {
+      myLastAttempt.set(a.lead_id, a);
+    }
+
+    for (const l of doneLeads ?? []) {
+      let label = "";
+      let at: string = l.updated_at;
+      const prof = profileByLead.get(l.id);
+      const rd = myLastRound.get(l.id);
+      const st = statusByLead.get(l.id);
+      const att = myLastAttempt.get(l.id);
+      if (prof) {
+        label = `Expert Created — ${prof.expert_id}`;
+        at = prof.linked_at ?? at;
+      } else if (rd) {
+        if (rd.passed === false) {
+          label = `Failed at Round ${rd.round_number}`;
+        } else if (rd.next_owner_email) {
+          const isLast = rd.round_number >= numRounds;
+          label = isLast
+            ? `Passed to ${rd.next_owner_email} for Expert Creation`
+            : `Passed to ${rd.next_owner_email} for Round ${rd.round_number + 1}`;
+        } else if (rd.passed) {
+          label = `Round ${rd.round_number} passed`;
+        } else {
+          label = `Round ${rd.round_number} submitted`;
+        }
+        at = rd.submitted_at ?? at;
+      } else if (st && st.status === "connected" && st.assigned_kam_email) {
+        label = `Connected → Passed to ${st.assigned_kam_email} for Round 1`;
+      } else if (st && st.status === "junk") {
+        label = "Junk";
+      } else if (st && st.status === "not_interested") {
+        label = "Not Interested";
+      } else if (att) {
+        const out = att.outcome ?? (att.connected ? "connected" : "rnr");
+        if (out === "rnr") label = `RNR after Attempt ${att.attempt_number} (terminal)`;
+        else if (out === "reconnect") label = `Reconnect after Attempt ${att.attempt_number} (terminal)`;
+        else label = `${out} after Attempt ${att.attempt_number}`;
+        at = att.attempted_at;
+      } else {
+        label = l.current_stage;
+      }
+      done.push({ id: l.id, lead_id: l.lead_id, name: l.name, label, at });
+    }
+    done.sort((a, b) => (a.at < b.at ? 1 : -1));
+  }
+
   return {
-    leads: list.map((l) => ({ ...l, attempts_logged: attemptsByLead.get(l.id) ?? 0 })),
+    cfg: { num_rounds: numRounds },
+    active,
+    done,
+    summary: { attemptDone, roundDone, expertDone },
   };
 });
 
