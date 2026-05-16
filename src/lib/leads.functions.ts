@@ -69,7 +69,7 @@ export const getLead = createServerFn({ method: "GET" })
   .inputValidator((i: { id: string }) => z.object({ id: z.string().uuid() }).parse(i))
   .handler(async ({ data }) => {
     const u = await requireUser();
-    const lead = await loadLeadOwned(data.id, u.email);
+    const lead = await loadLeadOwned(data.id, u.email, { allowAssignee: true });
     const [{ data: attempts }, { data: status }, { data: rounds }, { data: profile }, { data: audit }] =
       await Promise.all([
         supabaseAdmin
