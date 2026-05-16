@@ -6,8 +6,7 @@ import { getMe } from "@/lib/me.functions";
 import {
   getLead,
   getPool,
-  logCallAttempt,
-  setCallingStatus,
+  logCallOutcome,
   startRound,
   submitRound,
   linkExpertProfile,
@@ -224,130 +223,169 @@ function ActionsPanel({ data, role, onChanged }: { data: LeadData; role: string;
 }
 
 function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => void }) {
-  const { lead, attempts, status } = data;
-  const logFn = useServerFn(logCallAttempt);
-  const statusFn = useServerFn(setCallingStatus);
+  const { lead, attempts } = data;
+  const logFn = useServerFn(logCallOutcome);
   const fetchPool = useServerFn(getPool);
-  const poolQ = useQuery({ queryKey: ["pool", "round_1"], queryFn: () => fetchPool({ data: { stage: "round_1" } }) });
+  const poolQ = useQuery({
+    queryKey: ["pool", "round_1"],
+    queryFn: () => fetchPool({ data: { stage: "round_1" } }),
+    staleTime: 5 * 60_000,
+  });
 
-  const nextAttempt = useMemo(() => {
-    const last = attempts[attempts.length - 1];
-    if (!last) return 1;
-    if (last.connected) return null;
-    if (last.attempt_number >= 3) return null;
-    return last.attempt_number + 1;
-  }, [attempts]);
+  // Determine which attempt is next, or null if locked.
+  const sorted = [...attempts].sort((a, b) => a.attempt_number - b.attempt_number);
+  const last = sorted[sorted.length - 1] as
+    | (typeof sorted[number] & { outcome?: string | null })
+    | undefined;
+  const lastOutcome = last
+    ? (last.outcome ?? (last.connected ? "connected" : "rnr"))
+    : null;
+  const terminal = lastOutcome
+    ? ["connected", "junk", "not_interested"].includes(lastOutcome)
+    : false;
+  const nextAttempt = !last
+    ? 1
+    : terminal
+    ? null
+    : last.attempt_number >= 3
+    ? null
+    : last.attempt_number + 1;
 
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [statusVal, setStatusVal] = useState<string>("connected");
+  const [outcome, setOutcome] = useState<string>("connected");
   const [remarks, setRemarks] = useState("");
   const [kam, setKam] = useState("");
 
-  const hasConnected = attempts.some((a) => a.connected);
-  const forcedRnr = !hasConnected && attempts.length >= 3;
+  const OUTCOME_LABELS: Record<string, string> = {
+    connected: "Connected — spoke to them",
+    rnr: "RNR — phone rang, no answer",
+    reconnect: "Reconnect — asked to call back later",
+    junk: "Junk — wrong number / spam / fake",
+    not_interested: "Not Interested — picked up but refused",
+  };
 
-  useEffect(() => {
-    if (forcedRnr) setStatusVal("rnr");
-  }, [forcedRnr]);
-
-  async function logAttempt(connected: boolean) {
+  async function save() {
     if (nextAttempt == null) return;
-    setBusy(true); setErr(null);
-    try { await logFn({ data: { lead_id: lead.id, attempt_number: nextAttempt, connected } }); onChanged(); }
-    catch (e) { setErr((e as Error).message); }
-    finally { setBusy(false); }
-  }
-
-  async function submitStatus() {
-    setBusy(true); setErr(null);
+    setBusy(true);
+    setErr(null);
     try {
-      await statusFn({
+      await logFn({
         data: {
           lead_id: lead.id,
-          status: statusVal as "connected" | "junk" | "not_interested" | "reconnect" | "rnr",
+          attempt_number: nextAttempt,
+          outcome: outcome as "connected" | "rnr" | "reconnect" | "junk" | "not_interested",
           remarks: remarks || null,
-          assigned_kam_email: statusVal === "connected" ? kam || null : null,
+          assigned_kam_email: outcome === "connected" ? kam || null : null,
         },
       });
+      setRemarks("");
+      setKam("");
+      setOutcome("connected");
       onChanged();
-    } catch (e) { setErr((e as Error).message); }
-    finally { setBusy(false); }
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
     <Card>
-      <CardHeader><CardTitle>Calling actions</CardTitle></CardHeader>
-      <CardContent className="space-y-5">
-        <section className="space-y-2">
-          <h3 className="text-sm font-medium">Log call attempt</h3>
-          {nextAttempt == null ? (
-            <p className="text-sm text-muted-foreground">All attempts complete (last one connected).</p>
-          ) : (
+      <CardHeader>
+        <CardTitle>Calling actions</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Read-only history */}
+        {sorted.length > 0 && (
+          <div className="rounded border bg-muted/30 p-3 text-sm">
+            <div className="mb-1 font-medium">Previous attempts</div>
+            <ul className="space-y-0.5">
+              {sorted.map((a) => {
+                const o =
+                  (a as { outcome?: string | null }).outcome ??
+                  (a.connected ? "connected" : "rnr");
+                return (
+                  <li key={a.id} className="text-muted-foreground">
+                    #{a.attempt_number} — <span className="text-foreground">{OUTCOME_LABELS[o] ?? o}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+
+        {nextAttempt == null ? (
+          <p className="text-sm text-muted-foreground">
+            {terminal
+              ? "Lead is finalised — no more attempts."
+              : "All 3 attempts logged. Lead is locked at this status."}
+          </p>
+        ) : (
+          <>
             <div className="flex items-center gap-2">
-              <Badge variant="outline">Attempt #{nextAttempt}</Badge>
-              <Button size="sm" disabled={busy} onClick={() => logAttempt(true)}>Connected</Button>
-              <Button size="sm" variant="outline" disabled={busy} onClick={() => logAttempt(false)}>Not connected</Button>
+              <Badge variant="outline">Call Attempt #{nextAttempt}</Badge>
+              <span className="text-xs text-muted-foreground">
+                You called this lead — log what happened.
+              </span>
             </div>
-          )}
-        </section>
 
-        <Separator />
-
-        <section className="space-y-3">
-          <h3 className="text-sm font-medium">
-            Set calling status{" "}
-            {forcedRnr ? (
-              <span className="text-xs text-muted-foreground">(auto-marked RNR after 3 unanswered attempts)</span>
-            ) : statusVal === "connected" && !hasConnected ? (
-              <span className="text-xs text-muted-foreground">(Connected status needs ≥1 connected attempt)</span>
-            ) : null}
-          </h3>
-          {forcedRnr ? (
             <div>
-              <Label>Status</Label>
-              <div className="mt-1">
-                <Badge variant="secondary">Ring no response (RNR)</Badge>
-              </div>
+              <Label>Outcome of this call</Label>
+              <Select value={outcome} onValueChange={setOutcome}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(OUTCOME_LABELS).map(([v, l]) => (
+                    <SelectItem key={v} value={v}>
+                      {l}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2">
+
+            {outcome === "connected" && (
               <div>
-                <Label>Status</Label>
-                <Select value={statusVal} onValueChange={setStatusVal}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                <Label>Assign KAM (Round 1 pool) *</Label>
+                <Select value={kam} onValueChange={setKam}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choose KAM" />
+                  </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="connected">Connected → assign KAM</SelectItem>
-                    <SelectItem value="rnr">Ring no response</SelectItem>
-                    <SelectItem value="reconnect">Reconnect later</SelectItem>
-                    <SelectItem value="not_interested">Not interested</SelectItem>
-                    <SelectItem value="junk">Junk</SelectItem>
+                    {(poolQ.data?.members ?? []).map((m) => (
+                      <SelectItem key={m} value={m}>
+                        {m}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
-              {statusVal === "connected" && (
-                <div>
-                  <Label>Assign KAM (Round 1 pool)</Label>
-                  <Select value={kam} onValueChange={setKam}>
-                    <SelectTrigger><SelectValue placeholder="Choose KAM" /></SelectTrigger>
-                    <SelectContent>
-                      {(poolQ.data?.members ?? []).map((m) => (
-                        <SelectItem key={m} value={m}>{m}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
+            )}
+
+            <div>
+              <Label>
+                Remarks{" "}
+                <span className="text-xs text-muted-foreground">
+                  {outcome === "connected" ? "(what did they say?)" : "(optional)"}
+                </span>
+              </Label>
+              <Textarea
+                value={remarks}
+                onChange={(e) => setRemarks(e.target.value)}
+                rows={2}
+              />
             </div>
-          )}
-          <div>
-            <Label>Remarks</Label>
-            <Textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2} />
-          </div>
-          <Button onClick={submitStatus} disabled={busy || (!forcedRnr && statusVal === "connected" && (!hasConnected || !kam))}>
-            {status ? "Update status" : "Save status"}
-          </Button>
-        </section>
+
+            <Button
+              onClick={save}
+              disabled={busy || (outcome === "connected" && !kam)}
+            >
+              {busy ? "Saving…" : "Save"}
+            </Button>
+          </>
+        )}
 
         {err && <p className="text-sm text-destructive">{err}</p>}
       </CardContent>
