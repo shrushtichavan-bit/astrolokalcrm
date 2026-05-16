@@ -479,6 +479,12 @@ async function buildAllLeadsRows(f: AllLeadsFilterT) {
   }
   const profBy = new Map((profiles ?? []).map((p) => [p.lead_id, p]));
 
+  type RoundInfo = {
+    status: string;
+    taker: string;
+    submitted_at: string | null;
+  };
+
   type OutRow = {
     id: string;
     lead_id: string;
@@ -490,9 +496,12 @@ async function buildAllLeadsRows(f: AllLeadsFilterT) {
     a1: string;
     a2: string;
     a3: string;
+    a1_at: string | null;
     final_calling_status: string;
-    rounds_status: Record<number, string>;
+    rounds_status: Record<number, RoundInfo>;
     profile_creation_status: string;
+    profile_created_at: string | null;
+    profile_creator: string;
     active_status: string;
     stage: string;
     owner: string;
@@ -519,13 +528,21 @@ async function buildAllLeadsRows(f: AllLeadsFilterT) {
       if (!x) return "—";
       return x.outcome ?? (x.connected ? "connected" : "rnr");
     };
+    const a1Row = a.find((z: { attempt_number: number }) => z.attempt_number === 1) as
+      | { attempted_at: string }
+      | undefined;
+    const a1_at = a1Row?.attempted_at ?? null;
     const rArr = (roundsBy.get(l.id) ?? []).slice().sort((x: { round_number: number }, y: { round_number: number }) => x.round_number - y.round_number);
-    const rounds_status: Record<number, string> = {};
+    const rounds_status: Record<number, RoundInfo> = {};
     for (let n = 1; n <= numRounds; n++) {
       const r = rArr.find((z: { round_number: number }) => z.round_number === n) as
-        | { passed: boolean | null; submitted_at: string | null }
+        | { passed: boolean | null; submitted_at: string | null; conducted_by: string }
         | undefined;
-      rounds_status[n] = roundLabel(r);
+      rounds_status[n] = {
+        status: roundLabel(r),
+        taker: r?.conducted_by ?? "—",
+        submitted_at: r?.submitted_at ?? null,
+      };
     }
     const verdict = (() => {
       if (l.current_stage === "failed") return "Failed";
@@ -541,7 +558,9 @@ async function buildAllLeadsRows(f: AllLeadsFilterT) {
       : a.length > 0
         ? "In Progress"
         : "Pending";
-    const prof = profBy.get(l.id) as { is_active: boolean } | undefined;
+    const prof = profBy.get(l.id) as
+      | { is_active: boolean; linked_at: string; linked_by: string }
+      | undefined;
     const profile_creation_status = prof
       ? "Created"
       : l.current_stage === "profile_creation_pending"
@@ -549,11 +568,13 @@ async function buildAllLeadsRows(f: AllLeadsFilterT) {
         : l.current_stage === "failed" || l.current_stage === "junk" || l.current_stage === "not_interested"
           ? "—"
           : "Not Started";
+    const profile_created_at = prof?.linked_at ?? null;
+    const profile_creator = prof?.linked_by ?? "—";
     const active_status = prof ? (prof.is_active ? "Active" : "Inactive") : "—";
     const touched = new Set<string>([l.assigned_to_email, l.current_owner_email]);
     for (const x of a) touched.add((x as { attempted_by: string }).attempted_by);
     for (const x of rArr) touched.add((x as { conducted_by: string }).conducted_by);
-    if (prof) touched.add((profBy.get(l.id) as { linked_by: string }).linked_by);
+    if (prof) touched.add(prof.linked_by);
     return {
       id: l.id,
       lead_id: l.lead_id,
@@ -563,9 +584,12 @@ async function buildAllLeadsRows(f: AllLeadsFilterT) {
       priority: l.priority,
       caller: l.assigned_to_email,
       a1: getA(1), a2: getA(2), a3: getA(3),
+      a1_at,
       final_calling_status,
       rounds_status,
       profile_creation_status,
+      profile_created_at,
+      profile_creator,
       active_status,
       stage: l.current_stage,
       owner: l.current_owner_email,
@@ -606,13 +630,18 @@ export const exportLeadsCsv = createServerFn({ method: "POST" })
   .handler(async ({ data: f }) => {
     await requireRole("admin");
     const { rows, num_rounds } = await buildAllLeadsRows(f);
-    const roundHeaders = Array.from({ length: num_rounds }, (_, i) => `round_${i + 1}_status`);
+    const roundHeaders = Array.from({ length: num_rounds }, (_, i) => [
+      `round_${i + 1}_status`,
+      `round_${i + 1}_taker`,
+      `round_${i + 1}_time`,
+    ]).flat();
     const header = [
       "lead_id", "lead_date", "name", "caller",
-      "a1_status", "a2_status", "a3_status",
+      "a1_status", "a1_at", "a2_status", "a3_status",
       "final_calling_status",
       ...roundHeaders,
-      "profile_creation_status", "active_status",
+      "profile_creation_status", "profile_created_at", "profile_creator",
+      "active_status",
     ];
     const esc = (v: unknown) => {
       const s = v == null ? "" : String(v);
@@ -620,13 +649,17 @@ export const exportLeadsCsv = createServerFn({ method: "POST" })
     };
     const lines = [header.join(",")];
     for (const r of rows) {
-      const roundVals = Array.from({ length: num_rounds }, (_, i) => r.rounds_status[i + 1] ?? "—");
+      const roundVals = Array.from({ length: num_rounds }, (_, i) => {
+        const ri = r.rounds_status[i + 1];
+        return [ri?.status ?? "—", ri?.taker ?? "—", ri?.submitted_at ?? ""];
+      }).flat();
       lines.push([
         r.lead_id, r.lead_date ?? "", r.name, r.caller,
-        r.a1, r.a2, r.a3,
+        r.a1, r.a1_at ?? "", r.a2, r.a3,
         r.final_calling_status,
         ...roundVals,
-        r.profile_creation_status, r.active_status,
+        r.profile_creation_status, r.profile_created_at ?? "", r.profile_creator,
+        r.active_status,
       ].map(esc).join(","));
     }
     return { csv: lines.join("\n") };

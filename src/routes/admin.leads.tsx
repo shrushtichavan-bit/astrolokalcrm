@@ -131,32 +131,45 @@ function AllLeadsPage() {
                 <th className="px-2 py-2 text-left">Lead Name</th>
                 <th className="px-2 py-2 text-left">Caller</th>
                 <th className="px-2 py-2 text-left">A1 Status</th>
+                <th className="px-2 py-2 text-left">A1 Time</th>
                 <th className="px-2 py-2 text-left">A2 Status</th>
                 <th className="px-2 py-2 text-left">A3 Status</th>
                 <th className="px-2 py-2 text-left">Final Calling Status</th>
                 {Array.from({ length: q.data?.num_rounds ?? 2 }, (_, i) => (
-                  <th key={i} className="px-2 py-2 text-left">Round {i + 1} Status</th>
+                  <th key={i} className="px-2 py-2 text-left">Round {i + 1} (taker / status / time)</th>
                 ))}
                 <th className="px-2 py-2 text-left">Profile Creation Status</th>
+                <th className="px-2 py-2 text-left">Profile Created At</th>
+                <th className="px-2 py-2 text-left">Profile Creator</th>
                 <th className="px-2 py-2 text-left">Active/Inactive</th>
                 <th className="px-2 py-2"></th>
               </tr>
             </thead>
             <tbody>
               {(q.data?.rows ?? []).map((r) => (
-                <tr key={r.id} className="border-t hover:bg-muted/30">
+                <tr key={r.id} className="border-t hover:bg-muted/30 align-top">
                   <td className="px-2 py-2 font-mono text-[11px]">{r.lead_id}</td>
                   <td className="px-2 py-2 text-muted-foreground">{r.lead_date ?? "—"}</td>
                   <td className="px-2 py-2">{r.name}</td>
                   <td className="px-2 py-2 text-xs text-muted-foreground">{r.caller}</td>
                   <td className="px-2 py-2">{r.a1}</td>
+                  <td className="px-2 py-2 text-xs text-muted-foreground">{r.a1_at ? new Date(r.a1_at).toLocaleString() : "—"}</td>
                   <td className="px-2 py-2">{r.a2}</td>
                   <td className="px-2 py-2">{r.a3}</td>
                   <td className="px-2 py-2">{r.final_calling_status}</td>
-                  {Array.from({ length: q.data?.num_rounds ?? 2 }, (_, i) => (
-                    <td key={i} className="px-2 py-2">{r.rounds_status?.[i + 1] ?? "—"}</td>
-                  ))}
+                  {Array.from({ length: q.data?.num_rounds ?? 2 }, (_, i) => {
+                    const ri = r.rounds_status?.[i + 1];
+                    return (
+                      <td key={i} className="px-2 py-2 text-xs">
+                        <div className="text-muted-foreground">{ri?.taker ?? "—"}</div>
+                        <div className="font-medium text-foreground">{ri?.status ?? "—"}</div>
+                        <div className="text-muted-foreground">{ri?.submitted_at ? new Date(ri.submitted_at).toLocaleString() : "—"}</div>
+                      </td>
+                    );
+                  })}
                   <td className="px-2 py-2">{r.profile_creation_status}</td>
+                  <td className="px-2 py-2 text-xs text-muted-foreground">{r.profile_created_at ? new Date(r.profile_created_at).toLocaleString() : "—"}</td>
+                  <td className="px-2 py-2 text-xs text-muted-foreground">{r.profile_creator}</td>
                   <td className="px-2 py-2">{r.active_status}</td>
                   <td className="px-2 py-2 text-right">
                     <Link to="/leads/$id" params={{ id: r.id }} className="text-xs font-medium text-primary hover:underline">Open →</Link>
