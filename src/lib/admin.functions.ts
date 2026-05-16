@@ -490,7 +490,10 @@ async function buildAllLeadsRows(f: AllLeadsFilterT) {
     a1: string;
     a2: string;
     a3: string;
-    rounds: string;
+    final_calling_status: string;
+    rounds_status: Record<number, string>;
+    profile_creation_status: string;
+    active_status: string;
     stage: string;
     owner: string;
     status: string | null;
@@ -498,6 +501,14 @@ async function buildAllLeadsRows(f: AllLeadsFilterT) {
     updated_at: string;
     touched: string[];
   };
+
+  function roundLabel(r: { passed: boolean | null; submitted_at: string | null } | undefined): string {
+    if (!r) return "—";
+    if (r.passed === true) return "Passed";
+    if (r.passed === false) return "Failed";
+    if (r.submitted_at) return "Submitted";
+    return "In Progress";
+  }
 
   let rowsOut: OutRow[] = all.map((l) => {
     const a = (attsBy.get(l.id) ?? []).slice().sort((x: { attempt_number: number }, y: { attempt_number: number }) => x.attempt_number - y.attempt_number);
@@ -509,12 +520,13 @@ async function buildAllLeadsRows(f: AllLeadsFilterT) {
       return x.outcome ?? (x.connected ? "connected" : "rnr");
     };
     const rArr = (roundsBy.get(l.id) ?? []).slice().sort((x: { round_number: number }, y: { round_number: number }) => x.round_number - y.round_number);
-    const roundLabels = rArr.map((r: { round_number: number; passed: boolean | null; submitted_at: string | null }) => {
-      if (r.passed === true) return `R${r.round_number}✓`;
-      if (r.passed === false) return `R${r.round_number}✗`;
-      if (r.submitted_at) return `R${r.round_number}•`;
-      return `R${r.round_number}…`;
-    }).join(" ");
+    const rounds_status: Record<number, string> = {};
+    for (let n = 1; n <= numRounds; n++) {
+      const r = rArr.find((z: { round_number: number }) => z.round_number === n) as
+        | { passed: boolean | null; submitted_at: string | null }
+        | undefined;
+      rounds_status[n] = roundLabel(r);
+    }
     const verdict = (() => {
       if (l.current_stage === "failed") return "Failed";
       if (l.current_stage === "active" || l.current_stage === "profile_created") return "Passed";
@@ -524,11 +536,24 @@ async function buildAllLeadsRows(f: AllLeadsFilterT) {
       return "Pending";
     })();
     const status = csBy.get(l.id)?.status ?? null;
+    const final_calling_status = status
+      ? status
+      : a.length > 0
+        ? "In Progress"
+        : "Pending";
+    const prof = profBy.get(l.id) as { is_active: boolean } | undefined;
+    const profile_creation_status = prof
+      ? "Created"
+      : l.current_stage === "profile_creation_pending"
+        ? "Pending"
+        : l.current_stage === "failed" || l.current_stage === "junk" || l.current_stage === "not_interested"
+          ? "—"
+          : "Not Started";
+    const active_status = prof ? (prof.is_active ? "Active" : "Inactive") : "—";
     const touched = new Set<string>([l.assigned_to_email, l.current_owner_email]);
     for (const x of a) touched.add((x as { attempted_by: string }).attempted_by);
     for (const x of rArr) touched.add((x as { conducted_by: string }).conducted_by);
-    const p = profBy.get(l.id);
-    if (p) touched.add(p.linked_by);
+    if (prof) touched.add((profBy.get(l.id) as { linked_by: string }).linked_by);
     return {
       id: l.id,
       lead_id: l.lead_id,
@@ -538,7 +563,10 @@ async function buildAllLeadsRows(f: AllLeadsFilterT) {
       priority: l.priority,
       caller: l.assigned_to_email,
       a1: getA(1), a2: getA(2), a3: getA(3),
-      rounds: roundLabels || "—",
+      final_calling_status,
+      rounds_status,
+      profile_creation_status,
+      active_status,
       stage: l.current_stage,
       owner: l.current_owner_email,
       status,
@@ -562,7 +590,7 @@ async function buildAllLeadsRows(f: AllLeadsFilterT) {
     if (sort === "updated") return a.updated_at < b.updated_at ? 1 : -1;
     return (a.lead_date ?? "") < (b.lead_date ?? "") ? 1 : -1;
   });
-  return rowsOut;
+  return { rows: rowsOut, num_rounds: numRounds };
 }
 
 export const listAllLeads = createServerFn({ method: "POST" })
