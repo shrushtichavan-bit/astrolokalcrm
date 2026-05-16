@@ -442,15 +442,14 @@ function RoundActions({ data, round, onChanged }: { data: LeadData; round: numbe
     queryKey: ["round-questions", lead.id, round],
     queryFn: () => startFn({ data: { lead_id: lead.id, round_number: round } }),
   });
-  const nextStageKey = `round_${round + 1}` as "round_2" | "round_3" | "round_4";
+  const numRounds = data.cfg.num_rounds;
+  const isLastRound = round >= numRounds;
+  const nextStage: "round_2" | "round_3" | "round_4" | "expert_creation" = isLastRound
+    ? "expert_creation"
+    : (`round_${round + 1}` as "round_2" | "round_3" | "round_4");
   const poolQ = useQuery({
-    queryKey: ["pool", nextStageKey === "round_2" || nextStageKey === "round_3" || nextStageKey === "round_4" ? nextStageKey : "expert_creation"],
-    queryFn: () =>
-      fetchPool({
-        data: {
-          stage: round < 4 ? nextStageKey : "expert_creation",
-        },
-      }),
+    queryKey: ["pool", nextStage],
+    queryFn: () => fetchPool({ data: { stage: nextStage } }),
   });
 
   const [grades, setGrades] = useState<Record<string, number>>({});
