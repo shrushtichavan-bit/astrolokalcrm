@@ -1,10 +1,10 @@
-// Lead Dump sheet writer — keeps the lead_dump tab in sync with the funnel.
-// Background per-lead upserts on every CRM action, plus a full rebuild from
-// the sync page and once a day at midnight.
+// Lead Dump sheet writer — always upserts, never rebuilds.
+// Find row by lead_id (column B). If present, update in place. Else append.
+// Header row is only written when the sheet is completely empty.
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import {
   appendRange,
-  clearRange,
+  batchUpdateValues,
   readRange,
   SHEETS_TABS,
   writeRange,
