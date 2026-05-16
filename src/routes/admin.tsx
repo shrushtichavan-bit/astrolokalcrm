@@ -15,21 +15,33 @@ export const Route = createFileRoute("/admin")({
 
 function AdminLayout() {
   const { user } = Route.useLoaderData();
-  const tabClass =
-    "rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-muted";
-  const activeClass = "bg-foreground text-background";
+  const base =
+    "px-1 pb-3 text-[14px] text-[#6B6B6B] transition-colors duration-150 hover:text-[#1A1A1A]";
+  const active = {
+    className:
+      "px-1 pb-3 text-[14px] font-semibold text-[#1A1A1A] border-b-2 border-[#F45722]",
+  };
+
   return (
     <AppShell user={user}>
-      <div className="space-y-6">
+      <div className="space-y-8">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Admin Panel</h1>
-          <p className="text-sm text-muted-foreground">Pipeline analytics & operations.</p>
+          <h1 className="text-[28px] font-bold tracking-tight text-[#1A1A1A]">Admin</h1>
+          <p className="mt-1 text-[15px] text-[#6B6B6B]">Pipeline analytics and operations.</p>
         </div>
-        <nav className="flex flex-wrap gap-2 border-b pb-3">
-          <Link to="/admin" className={tabClass} activeOptions={{ exact: true }} activeProps={{ className: `${tabClass} ${activeClass}` }}>Funnel</Link>
-          <Link to="/admin/people" className={tabClass} activeProps={{ className: `${tabClass} ${activeClass}` }}>People</Link>
-          <Link to="/admin/tat" className={tabClass} activeProps={{ className: `${tabClass} ${activeClass}` }}>TAT</Link>
-          <Link to="/admin/leads" className={tabClass} activeProps={{ className: `${tabClass} ${activeClass}` }}>All Leads</Link>
+        <nav className="-mb-px flex flex-wrap gap-6 border-b border-[#EBEBEB]">
+          <Link to="/admin" className={base} activeOptions={{ exact: true }} activeProps={active}>
+            Funnel
+          </Link>
+          <Link to="/admin/people" className={base} activeProps={active}>
+            People
+          </Link>
+          <Link to="/admin/tat" className={base} activeProps={active}>
+            TAT
+          </Link>
+          <Link to="/admin/leads" className={base} activeProps={active}>
+            All Leads
+          </Link>
         </nav>
         <Outlet />
       </div>

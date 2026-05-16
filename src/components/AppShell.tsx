@@ -1,5 +1,4 @@
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Button } from "@/components/ui/button";
 import { SESSION_STORAGE_KEY } from "@/lib/session-attacher";
 
 export function AppShell({
@@ -23,20 +22,20 @@ export function AppShell({
   }
 
   const navLinkBase =
-    "relative px-1 py-1 text-sm transition-colors hover:text-foreground";
+    "text-sm text-[#6B6B6B] hover:text-[#1A1A1A] transition-colors duration-150";
   const activeProps = {
-    className: "text-[#F45722] font-semibold after:absolute after:left-0 after:right-0 after:-bottom-3 after:h-[2px] after:bg-[#F45722] after:rounded-full",
+    className: "text-sm text-[#1A1A1A] font-semibold transition-colors duration-150",
   };
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b border-border bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3">
+      <header className="h-[52px] border-b border-[#EBEBEB] bg-white">
+        <div className="mx-auto flex h-full max-w-7xl items-center justify-between px-6">
           <div className="flex items-center gap-8">
-            <Link to="/" className="flex items-center" aria-label="AstroLokal CRM home">
-              <img src="/logo.svg" alt="AstroLokal" className="h-8 w-auto" />
+            <Link to="/" className="flex items-center" aria-label="AstroLokal home">
+              <img src="/logo.svg" alt="AstroLokal" className="h-7 w-auto" />
             </Link>
-            <nav className="flex items-center gap-6 text-muted-foreground">
+            <nav className="flex items-center gap-6">
               <Link to="/" className={navLinkBase} activeOptions={{ exact: true }} activeProps={activeProps}>
                 Dashboard
               </Link>
@@ -50,23 +49,21 @@ export function AppShell({
               )}
             </nav>
           </div>
-          <div className="flex items-center gap-4">
-            <div className="text-right">
-              <div className="text-sm font-medium text-foreground">{user.name}</div>
-              <div className="text-xs text-muted-foreground capitalize">{user.role}</div>
+          <div className="flex items-center gap-5">
+            <div className="text-right leading-tight">
+              <div className="text-sm text-[#1A1A1A]">{user.name}</div>
+              <div className="text-[12px] capitalize text-[#6B6B6B]">{user.role}</div>
             </div>
-            <Button
-              size="sm"
-              variant="outline"
+            <button
               onClick={logout}
-              className="border-[#F45722] text-[#F45722] hover:bg-[#F45722] hover:text-white"
+              className="text-sm text-[#6B6B6B] transition-colors duration-150 hover:text-[#1A1A1A]"
             >
               Logout
-            </Button>
+            </button>
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-7xl px-6 py-8">{children}</main>
+      <main className="mx-auto max-w-7xl px-6 py-10">{children}</main>
     </div>
   );
 }

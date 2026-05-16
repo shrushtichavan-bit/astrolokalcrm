@@ -172,7 +172,7 @@ function AllLeadsPage() {
                   <td className="px-2 py-2 text-xs text-muted-foreground">{r.profile_creator}</td>
                   <td className="px-2 py-2">{r.active_status}</td>
                   <td className="px-2 py-2 text-right">
-                    <Link to="/leads/$id" params={{ id: r.id }} className="text-xs font-medium text-primary hover:underline">Open →</Link>
+                    <Link to="/leads/$id" params={{ id: r.id }} className="text-xs font-medium text-[#F45722] hover:text-[#D94A1E]">Open</Link>
                   </td>
                 </tr>
               ))}
