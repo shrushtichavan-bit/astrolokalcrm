@@ -29,6 +29,15 @@ function fmtTime(iso: string | null): string {
   });
 }
 
+/** All syncs run on a wall-clock cadence every 15 minutes (:00, :15, :30, :45). */
+function nextSyncIso(now: Date = new Date()): string {
+  const d = new Date(now);
+  const m = d.getMinutes();
+  const add = 15 - (m % 15);
+  d.setMinutes(m + add, 0, 0);
+  return d.toISOString();
+}
+
 function SyncPage() {
   const { user } = Route.useLoaderData();
   const fns: Record<Key, () => Promise<unknown>> = {
