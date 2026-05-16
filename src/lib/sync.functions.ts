@@ -347,6 +347,7 @@ export const syncActiveExperts = createServerFn({ method: "POST" }).handler(asyn
       metadata: { source: "active_experts_sync" } as never,
     }));
     await supabaseAdmin.from("audit_log").insert(auditRows);
+    for (const lid of leadIdsActivated) upsertLeadDumpInBackground(lid);
   }
 
   const activeTotal = (profiles ?? []).filter((p) => {
