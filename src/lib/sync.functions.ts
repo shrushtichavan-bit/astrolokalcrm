@@ -7,11 +7,19 @@ import { hashPassword, requireRole } from "./auth.server";
 const VALID_ROLES = new Set(["telecaller", "kam", "expert_creation_agent", "admin"]);
 const VALID_STAGES = new Set(["round_1", "round_2", "round_3", "round_4", "expert_creation"]);
 
-/** Sync credentials tab → users table. Hashes plain-text passwords with bcrypt. */
+/**
+ * Sync credentials tab → users table.
+ * FULL REPLACE, atomic-ish: read + validate + hash everything first; only then
+ * delete existing users and insert fresh rows. If the read or any hash fails,
+ * the existing users table is left untouched.
+ */
 export const syncCredentials = createServerFn({ method: "POST" }).handler(async () => {
   const rows = await readTab(SHEETS_TABS.credentials);
-  let upserted = 0;
   const errors: string[] = [];
+  type UserInsert = { name: string; email: string; password_hash: string; role: string };
+  const toInsert: UserInsert[] = [];
+  const seenEmails = new Set<string>();
+
   for (const r of rows) {
     const name = r.name?.trim();
     const email = r.email?.trim().toLowerCase();
@@ -25,28 +33,59 @@ export const syncCredentials = createServerFn({ method: "POST" }).handler(async 
       errors.push(`invalid role "${role}" for ${email}`);
       continue;
     }
+    if (seenEmails.has(email)) {
+      errors.push(`duplicate email in sheet: ${email}`);
+      continue;
+    }
+    seenEmails.add(email);
     const password_hash = await hashPassword(password);
-    const { error } = await supabaseAdmin
-      .from("users")
-      .upsert({ name, email, password_hash, role }, { onConflict: "email" });
-    if (error) errors.push(`${email}: ${error.message}`);
-    else upserted++;
+    toInsert.push({ name, email, password_hash, role });
   }
-  return { upserted, errors, total: rows.length };
+
+  if (toInsert.length === 0) {
+    return {
+      loaded: 0,
+      total: rows.length,
+      errors,
+      summary: "No valid team members found in the sheet. Existing team kept as-is.",
+    };
+  }
+
+  // Full replace: wipe then insert. Done sequentially; if insert fails we
+  // surface the error so the admin can re-run.
+  const { error: delErr } = await supabaseAdmin.from("users").delete().not("id", "is", null);
+  if (delErr) throw new Error(`failed to clear users: ${delErr.message}`);
+  const { error: insErr } = await supabaseAdmin.from("users").insert(toInsert);
+  if (insErr) throw new Error(`failed to insert users: ${insErr.message}`);
+
+  return {
+    loaded: toInsert.length,
+    total: rows.length,
+    errors,
+    summary: `Loaded ${toInsert.length} team member${toInsert.length === 1 ? "" : "s"} from the sheet.`,
+  };
 });
 
-/** Sync leads tab → leads table. Append-only; existing lead_ids are skipped. */
+/**
+ * Sync leads tab → leads table.
+ * UPSERT semantics: never delete. For existing lead_ids, only refresh the raw
+ * sheet fields (name, contact, source, priority, assigned_to_email, lead_date).
+ * Funnel progress (current_stage, current_owner_email, attempts, grades) is
+ * NEVER touched. Returns new / updated / unchanged counts.
+ */
 export const syncLeads = createServerFn({ method: "POST" }).handler(async () => {
   const rows = await readTab(SHEETS_TABS.leads);
-  if (rows.length === 0) return { inserted: 0, skipped: 0, total: 0, errors: [] };
+  if (rows.length === 0) {
+    return { new: 0, updated: 0, unchanged: 0, total: 0, errors: [], summary: "Sheet was empty." };
+  }
 
-  // Pre-fetch existing lead_ids to skip duplicates cheaply
-  const ids = rows.map((r) => r.lead_id?.trim()).filter(Boolean);
-  const { data: existing } = await supabaseAdmin
+  const ids = rows.map((r) => r.lead_id?.trim()).filter(Boolean) as string[];
+  const { data: existingRows } = await supabaseAdmin
     .from("leads")
-    .select("lead_id")
+    .select("lead_id, name, contact, source, priority, assigned_to_email, lead_date")
     .in("lead_id", ids);
-  const existingSet = new Set((existing ?? []).map((e) => e.lead_id));
+  const existingMap = new Map<string, NonNullable<typeof existingRows>[number]>();
+  for (const e of existingRows ?? []) existingMap.set(e.lead_id, e);
 
   type LeadInsert = {
     lead_id: string;
@@ -61,20 +100,13 @@ export const syncLeads = createServerFn({ method: "POST" }).handler(async () => 
   };
   const toInsert: LeadInsert[] = [];
   const errors: string[] = [];
-  let skipped = 0;
+  let updated = 0;
+  let unchanged = 0;
+
   for (const r of rows) {
     const lead_id = r.lead_id?.trim();
     if (!lead_id) {
       errors.push("skip row without lead_id");
-      continue;
-    }
-    if (existingSet.has(lead_id)) {
-      // Backfill lead_date on existing rows
-      const ld = parseLeadDate(r.lead_date);
-      if (ld) {
-        await supabaseAdmin.from("leads").update({ lead_date: ld }).eq("lead_id", lead_id).is("lead_date", null);
-      }
-      skipped++;
       continue;
     }
     const assigned = r.assigned_to_email?.trim().toLowerCase();
@@ -83,16 +115,40 @@ export const syncLeads = createServerFn({ method: "POST" }).handler(async () => 
       continue;
     }
     const priorityRaw = parseInt(r.priority || "99", 10);
-    toInsert.push({
-      lead_id,
+    const fields = {
       name: r.name?.trim() || lead_id,
       contact: r.contact?.trim() || "",
       source: r.source?.trim() || null,
       priority: Number.isFinite(priorityRaw) ? priorityRaw : 99,
       assigned_to_email: assigned,
+      lead_date: parseLeadDate(r.lead_date),
+    };
+
+    const existing = existingMap.get(lead_id);
+    if (existing) {
+      // Compare only the sheet-managed fields. Funnel progress is preserved.
+      const changed =
+        existing.name !== fields.name ||
+        existing.contact !== fields.contact ||
+        (existing.source ?? null) !== fields.source ||
+        existing.priority !== fields.priority ||
+        existing.assigned_to_email !== fields.assigned_to_email ||
+        (existing.lead_date ?? null) !== fields.lead_date;
+      if (changed) {
+        const { error } = await supabaseAdmin.from("leads").update(fields).eq("lead_id", lead_id);
+        if (error) errors.push(`${lead_id}: ${error.message}`);
+        else updated++;
+      } else {
+        unchanged++;
+      }
+      continue;
+    }
+
+    toInsert.push({
+      lead_id,
+      ...fields,
       current_stage: "calling_pending",
       current_owner_email: assigned,
-      lead_date: parseLeadDate(r.lead_date),
     });
   }
 
@@ -102,7 +158,11 @@ export const syncLeads = createServerFn({ method: "POST" }).handler(async () => 
     if (error) errors.push(`insert: ${error.message}`);
     inserted = data?.length ?? 0;
   }
-  return { inserted, skipped, total: rows.length, errors };
+
+  const summary =
+    `${inserted} new, ${updated} updated, ${unchanged} unchanged ` +
+    `(out of ${rows.length} sheet row${rows.length === 1 ? "" : "s"}).`;
+  return { new: inserted, updated, unchanged, total: rows.length, errors, summary };
 });
 
 /** Parse DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD, or YYYY/MM/DD into ISO date. */
@@ -110,20 +170,23 @@ function parseLeadDate(raw: string | undefined | null): string | null {
   if (!raw) return null;
   const s = String(raw).trim();
   if (!s) return null;
-  // YYYY-MM-DD or YYYY/MM/DD
   let m = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
   if (m) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
-  // DD/MM/YYYY or DD-MM-YYYY
   m = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
   if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
   return null;
 }
 
-/** Sync round_config + questions_r1..4 + pools — overwrites configuration. */
+/**
+ * Sync round_config + questions_r1..N + pools.
+ * FULL REPLACE, atomic-ish: read + validate ALL sheet tabs first; only after
+ * everything is validated do we wipe and re-insert. If any read fails, no
+ * existing config rows are touched.
+ */
 export const syncConfig = createServerFn({ method: "POST" }).handler(async () => {
   const errors: string[] = [];
 
-  // round_config
+  // ---- 1. Read & validate everything BEFORE any write. ----
   const cfg = await readTab(SHEETS_TABS.roundConfig);
   if (cfg.length === 0) throw new Error("round_config tab is empty");
   const c = cfg[0];
@@ -134,35 +197,23 @@ export const syncConfig = createServerFn({ method: "POST" }).handler(async () =>
   if (!(rounds_required_for_verdict >= 1 && rounds_required_for_verdict <= num_rounds))
     throw new Error(`rounds_required_for_verdict must be ≤ num_rounds`);
 
-  await supabaseAdmin
-    .from("round_config")
-    .upsert({ id: 1, num_rounds, rounds_required_for_verdict, updated_at: new Date().toISOString() });
-
-  // passing marks
-  await supabaseAdmin.from("round_passing_marks").delete().gte("round_number", 1);
   const marks: Array<{ round_number: number; passing_marks: number }> = [];
   for (let n = 1; n <= num_rounds; n++) {
     const raw = c[`round_${n}_passing_marks`];
     const m = parseInt(raw, 10);
-    if (!Number.isFinite(m)) {
-      errors.push(`round_${n}_passing_marks invalid: "${raw}"`);
-      continue;
-    }
+    if (!Number.isFinite(m)) throw new Error(`round_${n}_passing_marks invalid: "${raw}"`);
     marks.push({ round_number: n, passing_marks: m });
   }
-  if (marks.length > 0) await supabaseAdmin.from("round_passing_marks").insert(marks);
 
-  // questions_rN
-  await supabaseAdmin.from("questions").delete().gte("round_number", 1);
+  const allQuestions: Array<{
+    round_number: number;
+    question_id: string;
+    question_text: string;
+    display_order: number;
+  }> = [];
   for (let n = 1; n <= num_rounds; n++) {
-    let qrows: Record<string, string>[] = [];
-    try {
-      qrows = await readTab(SHEETS_TABS.questions(n));
-    } catch (e) {
-      errors.push(`questions_r${n}: ${(e as Error).message}`);
-      continue;
-    }
-    const toInsert = qrows
+    const qrows = await readTab(SHEETS_TABS.questions(n));
+    const mapped = qrows
       .filter((q) => q.question_id && q.question_text)
       .map((q) => ({
         round_number: n,
@@ -170,14 +221,9 @@ export const syncConfig = createServerFn({ method: "POST" }).handler(async () =>
         question_text: q.question_text,
         display_order: parseInt(q.display_order || "0", 10) || 0,
       }));
-    if (toInsert.length > 0) {
-      const { error } = await supabaseAdmin.from("questions").insert(toInsert);
-      if (error) errors.push(`questions_r${n} insert: ${error.message}`);
-    }
+    allQuestions.push(...mapped);
   }
 
-  // pools
-  await supabaseAdmin.from("stage_pools").delete().neq("stage", "__never__");
   const poolRows = await readTab(SHEETS_TABS.pools);
   const toInsertPools = poolRows
     .filter((p) => p.stage && p.eligible_email)
@@ -192,50 +238,91 @@ export const syncConfig = createServerFn({ method: "POST" }).handler(async () =>
       }
       return true;
     });
+
+  // ---- 2. All sheets validated. Now wipe + re-insert. ----
+  await supabaseAdmin
+    .from("round_config")
+    .upsert({ id: 1, num_rounds, rounds_required_for_verdict, updated_at: new Date().toISOString() });
+
+  await supabaseAdmin.from("round_passing_marks").delete().gte("round_number", 1);
+  if (marks.length > 0) await supabaseAdmin.from("round_passing_marks").insert(marks);
+
+  await supabaseAdmin.from("questions").delete().gte("round_number", 1);
+  if (allQuestions.length > 0) {
+    const { error } = await supabaseAdmin.from("questions").insert(allQuestions);
+    if (error) errors.push(`questions insert: ${error.message}`);
+  }
+
+  await supabaseAdmin.from("stage_pools").delete().neq("stage", "__never__");
   if (toInsertPools.length > 0) {
-    // upsert ignoring dup
     const { error } = await supabaseAdmin
       .from("stage_pools")
       .upsert(toInsertPools, { onConflict: "stage,eligible_email", ignoreDuplicates: true });
     if (error) errors.push(`pools: ${error.message}`);
   }
 
+  const summary =
+    `${num_rounds} round${num_rounds === 1 ? "" : "s"}, ${allQuestions.length} ` +
+    `question${allQuestions.length === 1 ? "" : "s"}, ${toInsertPools.length} pool ` +
+    `entr${toInsertPools.length === 1 ? "y" : "ies"} loaded.`;
+
   return {
     num_rounds,
     rounds_required_for_verdict,
     passing_marks: marks.length,
+    questions: allQuestions.length,
     pool_entries: toInsertPools.length,
     errors,
+    summary,
   };
 });
 
 /**
  * Sync active_experts tab → expert_profiles.is_active.
- * When a lead's linked expert flips to TRUE, the lead transitions to "active".
+ * UPSERT semantics: never wipe. Row-by-row: only update is_active if it has
+ * changed. activated_at is set the FIRST time status flips to active and is
+ * never overwritten. Lead↔expert linkage (set by the Expert Creation Agent)
+ * is never touched. New expert IDs in the sheet that aren't yet linked to a
+ * lead are reported but not inserted (they need a lead linkage first).
  */
 export const syncActiveExperts = createServerFn({ method: "POST" }).handler(async () => {
   const rows = await readTab(SHEETS_TABS.activeExperts);
-  const map = new Map<string, boolean>();
+  const desiredByExpert = new Map<string, boolean>();
   for (const r of rows) {
     const eid = r.expert_id?.trim();
     if (!eid) continue;
     const v = (r.is_active ?? "").toString().trim().toUpperCase();
-    map.set(eid, v === "TRUE");
+    desiredByExpert.set(eid, v === "TRUE");
   }
 
   const { data: profiles } = await supabaseAdmin
     .from("expert_profiles")
-    .select("id, lead_id, expert_id, is_active");
+    .select("id, lead_id, expert_id, is_active, activated_at");
+
+  const profileIds = new Set((profiles ?? []).map((p) => p.expert_id));
+  const unlinked: string[] = [];
+  for (const eid of desiredByExpert.keys()) {
+    if (!profileIds.has(eid)) unlinked.push(eid);
+  }
+
   let activated = 0;
   let deactivated = 0;
+  let unchanged = 0;
   const leadIdsActivated: string[] = [];
 
   for (const p of profiles ?? []) {
-    if (!map.has(p.expert_id)) continue;
-    const desired = map.get(p.expert_id)!;
-    if (desired === p.is_active) continue;
+    if (!desiredByExpert.has(p.expert_id)) {
+      unchanged++;
+      continue;
+    }
+    const desired = desiredByExpert.get(p.expert_id)!;
+    if (desired === p.is_active) {
+      unchanged++;
+      continue;
+    }
+    // First-time activation stamps activated_at; subsequent flips never overwrite it.
     const update: { is_active: boolean; activated_at?: string } = { is_active: desired };
-    if (desired && !p.is_active) update.activated_at = new Date().toISOString();
+    if (desired && !p.activated_at) update.activated_at = new Date().toISOString();
     await supabaseAdmin.from("expert_profiles").update(update).eq("id", p.id);
     if (desired) {
       activated++;
@@ -252,7 +339,6 @@ export const syncActiveExperts = createServerFn({ method: "POST" }).handler(asyn
       .update({ current_stage: "active" })
       .in("id", leadIdsActivated);
     if (error) throw error;
-    // Audit
     const auditRows = leadIdsActivated.map((lid) => ({
       lead_id: lid,
       action: "stage_change:active",
@@ -262,17 +348,33 @@ export const syncActiveExperts = createServerFn({ method: "POST" }).handler(asyn
     await supabaseAdmin.from("audit_log").insert(auditRows);
   }
 
+  const activeTotal = (profiles ?? []).filter((p) => {
+    const desired = desiredByExpert.get(p.expert_id);
+    return desired === undefined ? p.is_active : desired;
+  }).length;
+  const inactiveTotal = (profiles ?? []).length - activeTotal;
+  const changed = activated + deactivated;
+
+  const summary =
+    `${activeTotal} active, ${inactiveTotal} inactive, ${changed} record${changed === 1 ? "" : "s"} changed` +
+    (unlinked.length ? ` (${unlinked.length} expert ID${unlinked.length === 1 ? "" : "s"} in sheet not yet linked to a lead)` : "") +
+    ".";
+
   return {
     sheet_rows: rows.length,
+    active: activeTotal,
+    inactive: inactiveTotal,
     activated,
     deactivated,
+    unchanged,
+    unlinked_expert_ids: unlinked,
     leads_flipped_active: leadIdsActivated.length,
+    summary,
   };
 });
 
 /** Run all four syncs in a sensible order. Convenience for the UI. */
 export const syncAll = createServerFn({ method: "POST" }).handler(async () => {
-  // Only signed-in users should be able to invoke from the app.
   await requireRole(["telecaller", "kam", "expert_creation_agent", "admin"]);
   const credentials = await syncCredentials();
   const config = await syncConfig();
