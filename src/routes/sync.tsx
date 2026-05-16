@@ -65,6 +65,14 @@ function SyncPage() {
     }
   }, []);
 
+  // Tick every 30s so the "Next sync" label stays accurate.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 30_000);
+    return () => clearInterval(t);
+  }, []);
+  const nextSync = nextSyncIso();
+
   async function run(key: Key, label: string) {
     setBusy(key);
     try {
