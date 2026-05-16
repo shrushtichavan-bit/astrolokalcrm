@@ -20,6 +20,7 @@ import { Route as AdminPeopleRouteImport } from './routes/admin.people'
 import { Route as AdminLeadsRouteImport } from './routes/admin.leads'
 import { Route as ApiAuthLoginRouteImport } from './routes/api/auth/login'
 import { Route as ApiPublicHooksSyncLeadsRouteImport } from './routes/api/public/hooks/sync-leads'
+import { Route as ApiPublicHooksSyncLeadDumpRouteImport } from './routes/api/public/hooks/sync-lead-dump'
 import { Route as ApiPublicHooksSyncExpertsRouteImport } from './routes/api/public/hooks/sync-experts'
 import { Route as ApiPublicHooksSyncCredentialsRouteImport } from './routes/api/public/hooks/sync-credentials'
 import { Route as ApiPublicHooksSyncConfigRouteImport } from './routes/api/public/hooks/sync-config'
@@ -81,6 +82,12 @@ const ApiPublicHooksSyncLeadsRoute = ApiPublicHooksSyncLeadsRouteImport.update({
   path: '/api/public/hooks/sync-leads',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicHooksSyncLeadDumpRoute =
+  ApiPublicHooksSyncLeadDumpRouteImport.update({
+    id: '/api/public/hooks/sync-lead-dump',
+    path: '/api/public/hooks/sync-lead-dump',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicHooksSyncExpertsRoute =
   ApiPublicHooksSyncExpertsRouteImport.update({
     id: '/api/public/hooks/sync-experts',
@@ -128,6 +135,7 @@ export interface FileRoutesByFullPath {
   '/api/public/hooks/sync-config': typeof ApiPublicHooksSyncConfigRoute
   '/api/public/hooks/sync-credentials': typeof ApiPublicHooksSyncCredentialsRoute
   '/api/public/hooks/sync-experts': typeof ApiPublicHooksSyncExpertsRoute
+  '/api/public/hooks/sync-lead-dump': typeof ApiPublicHooksSyncLeadDumpRoute
   '/api/public/hooks/sync-leads': typeof ApiPublicHooksSyncLeadsRoute
 }
 export interface FileRoutesByTo {
@@ -145,6 +153,7 @@ export interface FileRoutesByTo {
   '/api/public/hooks/sync-config': typeof ApiPublicHooksSyncConfigRoute
   '/api/public/hooks/sync-credentials': typeof ApiPublicHooksSyncCredentialsRoute
   '/api/public/hooks/sync-experts': typeof ApiPublicHooksSyncExpertsRoute
+  '/api/public/hooks/sync-lead-dump': typeof ApiPublicHooksSyncLeadDumpRoute
   '/api/public/hooks/sync-leads': typeof ApiPublicHooksSyncLeadsRoute
 }
 export interface FileRoutesById {
@@ -164,6 +173,7 @@ export interface FileRoutesById {
   '/api/public/hooks/sync-config': typeof ApiPublicHooksSyncConfigRoute
   '/api/public/hooks/sync-credentials': typeof ApiPublicHooksSyncCredentialsRoute
   '/api/public/hooks/sync-experts': typeof ApiPublicHooksSyncExpertsRoute
+  '/api/public/hooks/sync-lead-dump': typeof ApiPublicHooksSyncLeadDumpRoute
   '/api/public/hooks/sync-leads': typeof ApiPublicHooksSyncLeadsRoute
 }
 export interface FileRouteTypes {
@@ -184,6 +194,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/sync-config'
     | '/api/public/hooks/sync-credentials'
     | '/api/public/hooks/sync-experts'
+    | '/api/public/hooks/sync-lead-dump'
     | '/api/public/hooks/sync-leads'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -201,6 +212,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/sync-config'
     | '/api/public/hooks/sync-credentials'
     | '/api/public/hooks/sync-experts'
+    | '/api/public/hooks/sync-lead-dump'
     | '/api/public/hooks/sync-leads'
   id:
     | '__root__'
@@ -219,6 +231,7 @@ export interface FileRouteTypes {
     | '/api/public/hooks/sync-config'
     | '/api/public/hooks/sync-credentials'
     | '/api/public/hooks/sync-experts'
+    | '/api/public/hooks/sync-lead-dump'
     | '/api/public/hooks/sync-leads'
   fileRoutesById: FileRoutesById
 }
@@ -234,6 +247,7 @@ export interface RootRouteChildren {
   ApiPublicHooksSyncConfigRoute: typeof ApiPublicHooksSyncConfigRoute
   ApiPublicHooksSyncCredentialsRoute: typeof ApiPublicHooksSyncCredentialsRoute
   ApiPublicHooksSyncExpertsRoute: typeof ApiPublicHooksSyncExpertsRoute
+  ApiPublicHooksSyncLeadDumpRoute: typeof ApiPublicHooksSyncLeadDumpRoute
   ApiPublicHooksSyncLeadsRoute: typeof ApiPublicHooksSyncLeadsRoute
 }
 
@@ -316,6 +330,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicHooksSyncLeadsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/hooks/sync-lead-dump': {
+      id: '/api/public/hooks/sync-lead-dump'
+      path: '/api/public/hooks/sync-lead-dump'
+      fullPath: '/api/public/hooks/sync-lead-dump'
+      preLoaderRoute: typeof ApiPublicHooksSyncLeadDumpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/hooks/sync-experts': {
       id: '/api/public/hooks/sync-experts'
       path: '/api/public/hooks/sync-experts'
@@ -383,6 +404,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicHooksSyncConfigRoute: ApiPublicHooksSyncConfigRoute,
   ApiPublicHooksSyncCredentialsRoute: ApiPublicHooksSyncCredentialsRoute,
   ApiPublicHooksSyncExpertsRoute: ApiPublicHooksSyncExpertsRoute,
+  ApiPublicHooksSyncLeadDumpRoute: ApiPublicHooksSyncLeadDumpRoute,
   ApiPublicHooksSyncLeadsRoute: ApiPublicHooksSyncLeadsRoute,
 }
 export const routeTree = rootRouteImport
