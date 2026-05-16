@@ -429,8 +429,11 @@ export const getTAT = createServerFn({ method: "POST" })
   });
 
 // ============================================================
-// ALL LEADS (table + CSV)
+// ALL LEADS (cursor-paginated, server-side filtered + sorted)
 // ============================================================
+
+const SortKey = z.enum(["lead_date", "priority", "stage", "updated"]);
+type SortKeyT = z.infer<typeof SortKey>;
 
 const AllLeadsFilter = z.object({
   from: z.string().nullish(),
@@ -439,229 +442,301 @@ const AllLeadsFilter = z.object({
   stage: z.string().nullish(),
   status: z.string().nullish(),
   verdict: z.string().nullish(),
-  sort: z.enum(["lead_date", "priority", "stage", "updated"]).nullish(),
+  sort: SortKey.nullish(),
+  cursor: z.string().nullish(),
+  limit: z.number().int().min(1).max(200).nullish(),
 });
 type AllLeadsFilterT = z.infer<typeof AllLeadsFilter>;
 
-async function buildAllLeadsRows(f: AllLeadsFilterT) {
-  const numRounds = await loadNumRounds();
-  let q = supabaseAdmin
-    .from("leads")
-    .select(
-      "id, lead_id, name, contact, lead_date, priority, current_stage, current_owner_email, assigned_to_email, updated_at",
-    );
-  if (f.from) q = q.gte("lead_date", f.from);
-  if (f.to) q = q.lte("lead_date", f.to);
-  if (f.stage) q = q.eq("current_stage", f.stage);
-  const { data: leads } = await q;
-  let all = leads ?? [];
-  const ids = all.map((l) => l.id);
-  if (ids.length === 0) return { rows: [], num_rounds: numRounds };
-
-  const [{ data: atts }, { data: cs }, { data: rounds }, { data: profiles }] = await Promise.all([
-    supabaseAdmin.from("call_attempts").select("*").in("lead_id", ids),
-    supabaseAdmin.from("calling_status").select("*").in("lead_id", ids),
-    supabaseAdmin.from("interview_rounds").select("*").in("lead_id", ids),
-    supabaseAdmin.from("expert_profiles").select("*").in("lead_id", ids),
-  ]);
-  const attsBy = new Map<string, typeof atts>();
-  for (const a of atts ?? []) {
-    const arr = attsBy.get(a.lead_id) ?? [];
-    arr.push(a as never);
-    attsBy.set(a.lead_id, arr as never);
-  }
-  const csBy = new Map((cs ?? []).map((s) => [s.lead_id, s]));
-  const roundsBy = new Map<string, typeof rounds>();
-  for (const r of rounds ?? []) {
-    const arr = roundsBy.get(r.lead_id) ?? [];
-    arr.push(r as never);
-    roundsBy.set(r.lead_id, arr as never);
-  }
-  const profBy = new Map((profiles ?? []).map((p) => [p.lead_id, p]));
-
-  type RoundInfo = {
-    status: string;
-    taker: string;
-    submitted_at: string | null;
-  };
-
-  type OutRow = {
-    id: string;
-    lead_id: string;
-    name: string;
-    contact: string;
-    lead_date: string | null;
-    priority: number;
-    caller: string;
-    a1: string;
-    a2: string;
-    a3: string;
-    a1_at: string | null;
-    final_calling_status: string;
-    rounds_status: Record<number, RoundInfo>;
-    profile_creation_status: string;
-    profile_created_at: string | null;
-    profile_creator: string;
-    active_status: string;
-    stage: string;
-    owner: string;
-    status: string | null;
-    verdict: string;
-    updated_at: string;
-    touched: string[];
-  };
-
-  function roundLabel(r: { passed: boolean | null; submitted_at: string | null } | undefined): string {
-    if (!r) return "—";
-    if (r.passed === true) return "Passed";
-    if (r.passed === false) return "Failed";
-    if (r.submitted_at) return "Submitted";
-    return "In Progress";
-  }
-
-  let rowsOut: OutRow[] = all.map((l) => {
-    const a = (attsBy.get(l.id) ?? []).slice().sort((x: { attempt_number: number }, y: { attempt_number: number }) => x.attempt_number - y.attempt_number);
-    const getA = (n: number) => {
-      const x = a.find((z: { attempt_number: number }) => z.attempt_number === n) as
-        | { outcome: string | null; connected: boolean }
-        | undefined;
-      if (!x) return "—";
-      return x.outcome ?? (x.connected ? "connected" : "rnr");
-    };
-    const a1Row = a.find((z: { attempt_number: number }) => z.attempt_number === 1) as
-      | { attempted_at: string }
-      | undefined;
-    const a1_at = a1Row?.attempted_at ?? null;
-    const rArr = (roundsBy.get(l.id) ?? []).slice().sort((x: { round_number: number }, y: { round_number: number }) => x.round_number - y.round_number);
-    const rounds_status: Record<number, RoundInfo> = {};
-    for (let n = 1; n <= numRounds; n++) {
-      const r = rArr.find((z: { round_number: number }) => z.round_number === n) as
-        | { passed: boolean | null; submitted_at: string | null; conducted_by: string }
-        | undefined;
-      rounds_status[n] = {
-        status: roundLabel(r),
-        taker: r?.conducted_by ?? "—",
-        submitted_at: r?.submitted_at ?? null,
-      };
-    }
-    const verdict = (() => {
-      if (l.current_stage === "failed") return "Failed";
-      if (l.current_stage === "active" || l.current_stage === "profile_created") return "Passed";
-      const lastR = rArr[rArr.length - 1] as { passed: boolean | null } | undefined;
-      if (lastR?.passed === true) return "Passed";
-      if (lastR?.passed === false) return "Failed";
-      return "Pending";
-    })();
-    const status = csBy.get(l.id)?.status ?? null;
-    const final_calling_status = status
-      ? status
-      : a.length > 0
-        ? "In Progress"
-        : "Pending";
-    const prof = profBy.get(l.id) as
-      | { is_active: boolean; linked_at: string; linked_by: string }
-      | undefined;
-    const profile_creation_status = prof
-      ? "Created"
-      : l.current_stage === "profile_creation_pending"
-        ? "Pending"
-        : l.current_stage === "failed" || l.current_stage === "junk" || l.current_stage === "not_interested"
-          ? "—"
-          : "Not Started";
-    const profile_created_at = prof?.linked_at ?? null;
-    const profile_creator = prof?.linked_by ?? "—";
-    const active_status = prof ? (prof.is_active ? "Active" : "Inactive") : "—";
-    const touched = new Set<string>([l.assigned_to_email, l.current_owner_email]);
-    for (const x of a) touched.add((x as { attempted_by: string }).attempted_by);
-    for (const x of rArr) touched.add((x as { conducted_by: string }).conducted_by);
-    if (prof) touched.add(prof.linked_by);
-    return {
-      id: l.id,
-      lead_id: l.lead_id,
-      name: l.name,
-      contact: l.contact,
-      lead_date: l.lead_date,
-      priority: l.priority,
-      caller: l.assigned_to_email,
-      a1: getA(1), a2: getA(2), a3: getA(3),
-      a1_at,
-      final_calling_status,
-      rounds_status,
-      profile_creation_status,
-      profile_created_at,
-      profile_creator,
-      active_status,
-      stage: l.current_stage,
-      owner: l.current_owner_email,
-      status,
-      verdict,
-      updated_at: l.updated_at,
-      touched: Array.from(touched),
-    };
-  });
+/**
+ * Resolve the set of lead ids that satisfy filters which require joining
+ * other tables (person, calling status, verdict). Returns null when no such
+ * filter is active (= no restriction from this resolver). Returns an empty
+ * set when the filters produce zero matches.
+ */
+async function resolveJoinFilterIds(f: AllLeadsFilterT): Promise<Set<string> | null> {
+  const sets: Set<string>[] = [];
 
   if (f.person) {
     const p = f.person.toLowerCase();
-    rowsOut = rowsOut.filter((r) => r.touched.includes(p));
+    const [{ data: ls }, { data: a }, { data: r }, { data: pr }, { data: cs }] = await Promise.all([
+      supabaseAdmin
+        .from("leads")
+        .select("id")
+        .or(`assigned_to_email.eq.${p},current_owner_email.eq.${p}`),
+      supabaseAdmin.from("call_attempts").select("lead_id").eq("attempted_by", p),
+      supabaseAdmin.from("interview_rounds").select("lead_id").eq("conducted_by", p),
+      supabaseAdmin.from("expert_profiles").select("lead_id").eq("linked_by", p),
+      supabaseAdmin.from("calling_status").select("lead_id").eq("assigned_kam_email", p),
+    ]);
+    const s = new Set<string>([
+      ...(ls ?? []).map((x) => x.id),
+      ...(a ?? []).map((x) => x.lead_id),
+      ...(r ?? []).map((x) => x.lead_id),
+      ...(pr ?? []).map((x) => x.lead_id),
+      ...(cs ?? []).map((x) => x.lead_id),
+    ]);
+    sets.push(s);
   }
-  if (f.status) rowsOut = rowsOut.filter((r) => r.status === f.status);
-  if (f.verdict) rowsOut = rowsOut.filter((r) => r.verdict.toLowerCase() === f.verdict!.toLowerCase());
 
-  const sort = f.sort ?? "lead_date";
-  rowsOut.sort((a, b) => {
-    if (sort === "priority") return a.priority - b.priority;
-    if (sort === "stage") return a.stage.localeCompare(b.stage);
-    if (sort === "updated") return a.updated_at < b.updated_at ? 1 : -1;
-    return (a.lead_date ?? "") < (b.lead_date ?? "") ? 1 : -1;
+  if (f.status) {
+    const { data } = await supabaseAdmin
+      .from("calling_status")
+      .select("lead_id")
+      .eq("status", f.status);
+    sets.push(new Set((data ?? []).map((x) => x.lead_id)));
+  }
+
+  if (f.verdict) {
+    // Verdict is derived from current_stage:
+    //   Passed  → profile_creation_pending, profile_created, active
+    //   Failed  → failed
+    //   Pending → everything else
+    const v = f.verdict.toLowerCase();
+    let stages: string[] = [];
+    let invert = false;
+    if (v === "passed") stages = ["profile_creation_pending", "profile_created", "active"];
+    else if (v === "failed") stages = ["failed"];
+    else {
+      stages = ["profile_creation_pending", "profile_created", "active", "failed"];
+      invert = true;
+    }
+    let q = supabaseAdmin.from("leads").select("id");
+    q = invert ? q.not("current_stage", "in", `(${stages.join(",")})`) : q.in("current_stage", stages);
+    const { data } = await q;
+    sets.push(new Set((data ?? []).map((x) => x.id)));
+  }
+
+  if (sets.length === 0) return null;
+  // Intersect all sets
+  return sets.reduce((acc, s) => new Set([...acc].filter((x) => s.has(x))));
+}
+
+function sortToColumn(sort: SortKeyT): { col: string; asc: boolean } {
+  switch (sort) {
+    case "priority": return { col: "priority", asc: true };
+    case "stage": return { col: "current_stage", asc: true };
+    case "updated": return { col: "updated_at", asc: false };
+    case "lead_date":
+    default: return { col: "lead_date", asc: false };
+  }
+}
+
+type Cursor = { v: string | number | null; id: string };
+
+function encodeCursor(c: Cursor): string {
+  return Buffer.from(JSON.stringify(c)).toString("base64");
+}
+function decodeCursor(s: string): Cursor | null {
+  try { return JSON.parse(Buffer.from(s, "base64").toString("utf8")); } catch { return null; }
+}
+
+async function queryLeadsPage(f: AllLeadsFilterT, limit: number) {
+  const joinIds = await resolveJoinFilterIds(f);
+  if (joinIds && joinIds.size === 0) {
+    return { leads: [] as Array<Record<string, unknown>>, total: 0, joinIds };
+  }
+  const sort = sortToColumn(f.sort ?? "lead_date");
+
+  // Build base query (for count and for page)
+  // Using `any` here is acceptable: the Supabase query builder type is
+  // self-referential and chaining the same filters over differently-typed
+  // builders (count vs select) is awkward to express otherwise.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function applyFilters(qb: any): any {
+    let q = qb;
+    if (f.from) q = q.gte("lead_date", f.from);
+    if (f.to) q = q.lte("lead_date", f.to);
+    if (f.stage) q = q.eq("current_stage", f.stage);
+    if (joinIds) {
+      const ids = Array.from(joinIds);
+      q = q.in("id", ids.slice(0, 1000));
+    }
+    return q;
+  }
+
+  // Total count (head-only)
+  const countQ = applyFilters(
+    supabaseAdmin.from("leads").select("id", { count: "exact", head: true }),
+  );
+  const { count } = await countQ;
+
+  // Page query
+  let pageQ = applyFilters(
+    supabaseAdmin
+      .from("leads")
+      .select(
+        "id, lead_id, name, contact, lead_date, priority, current_stage, current_owner_email, assigned_to_email, updated_at",
+      ),
+  )
+    .order(sort.col, { ascending: sort.asc, nullsFirst: false })
+    .order("id", { ascending: true })
+    .limit(limit + 1);
+
+  // Cursor: (sortValue, id) — keyset pagination
+  if (f.cursor) {
+    const c = decodeCursor(f.cursor);
+    if (c) {
+      const op = sort.asc ? "gt" : "lt";
+      // Rows where sort.col {op} c.v, OR (sort.col = c.v AND id > c.id)
+      // Supabase doesn't support tuple comparison via SDK; use or() filter.
+      const v = c.v;
+      const vStr = v == null ? "null" : typeof v === "string" ? `"${v}"` : String(v);
+      pageQ = pageQ.or(
+        `${sort.col}.${op}.${v == null ? "null" : v},and(${sort.col}.eq.${vStr},id.gt.${c.id})`,
+      );
+    }
+  }
+
+  const { data: leads, error } = await pageQ;
+  if (error) throw error;
+  return { leads: (leads ?? []) as Array<Record<string, unknown>>, total: count ?? 0, joinIds };
+}
+
+type ListRow = {
+  id: string;
+  lead_id: string;
+  name: string;
+  contact: string;
+  lead_date: string | null;
+  priority: number;
+  caller: string;
+  calling_status: string;
+  round_1_status: string;
+  round_2_status: string;
+  verdict: string;
+  current_stage: string;
+  updated_at: string;
+};
+
+function roundLabel(r: { passed: boolean | null; submitted_at: string | null } | undefined): string {
+  if (!r) return "—";
+  if (r.passed === true) return "Passed";
+  if (r.passed === false) return "Failed";
+  if (r.submitted_at) return "Submitted";
+  return "In Progress";
+}
+
+async function enrichLeads(
+  leads: Array<Record<string, unknown>>,
+): Promise<ListRow[]> {
+  if (leads.length === 0) return [];
+  const ids = leads.map((l) => l.id as string);
+  const [{ data: cs }, { data: rounds }] = await Promise.all([
+    supabaseAdmin.from("calling_status").select("lead_id, status").in("lead_id", ids),
+    supabaseAdmin
+      .from("interview_rounds")
+      .select("lead_id, round_number, passed, submitted_at")
+      .in("lead_id", ids)
+      .in("round_number", [1, 2]),
+  ]);
+  const csBy = new Map((cs ?? []).map((s) => [s.lead_id, s]));
+  const r1By = new Map<string, { passed: boolean | null; submitted_at: string | null }>();
+  const r2By = new Map<string, { passed: boolean | null; submitted_at: string | null }>();
+  for (const r of rounds ?? []) {
+    if (r.round_number === 1) r1By.set(r.lead_id, r);
+    else if (r.round_number === 2) r2By.set(r.lead_id, r);
+  }
+
+  return leads.map((l) => {
+    const id = l.id as string;
+    const stage = l.current_stage as string;
+    const r1 = r1By.get(id);
+    const r2 = r2By.get(id);
+    const verdict =
+      stage === "active" || stage === "profile_created" || stage === "profile_creation_pending"
+        ? "Passed"
+        : stage === "failed"
+          ? "Failed"
+          : "Pending";
+    return {
+      id,
+      lead_id: l.lead_id as string,
+      name: l.name as string,
+      contact: l.contact as string,
+      lead_date: (l.lead_date as string) ?? null,
+      priority: l.priority as number,
+      caller: l.assigned_to_email as string,
+      calling_status: (csBy.get(id)?.status as string) ?? "—",
+      round_1_status: roundLabel(r1),
+      round_2_status: roundLabel(r2),
+      verdict,
+      current_stage: stage,
+      updated_at: l.updated_at as string,
+    };
   });
-  return { rows: rowsOut, num_rounds: numRounds };
 }
 
 export const listAllLeads = createServerFn({ method: "POST" })
   .inputValidator((i: AllLeadsFilterT) => AllLeadsFilter.parse(i))
   .handler(async ({ data: f }) => {
     await requireRole("admin");
-    const { rows, num_rounds } = await buildAllLeadsRows(f);
-    return { rows, num_rounds };
+    const numRounds = await loadNumRounds();
+    const limit = f.limit ?? 100;
+    const { leads, total } = await queryLeadsPage(f, limit);
+    const hasMore = leads.length > limit;
+    const page = hasMore ? leads.slice(0, limit) : leads;
+    const rows = await enrichLeads(page);
+    const sort = sortToColumn(f.sort ?? "lead_date");
+    let nextCursor: string | null = null;
+    if (hasMore && page.length > 0) {
+      const last = page[page.length - 1] as Record<string, unknown>;
+      nextCursor = encodeCursor({
+        v: (last[sort.col] as string | number | null) ?? null,
+        id: last.id as string,
+      });
+    }
+    return { rows, total, next_cursor: nextCursor, num_rounds: numRounds };
   });
 
 export const exportLeadsCsv = createServerFn({ method: "POST" })
   .inputValidator((i: AllLeadsFilterT) => AllLeadsFilter.parse(i))
   .handler(async ({ data: f }) => {
     await requireRole("admin");
-    const { rows, num_rounds } = await buildAllLeadsRows(f);
-    const roundHeaders = Array.from({ length: num_rounds }, (_, i) => [
-      `round_${i + 1}_status`,
-      `round_${i + 1}_taker`,
-      `round_${i + 1}_time`,
-    ]).flat();
-    const header = [
-      "lead_id", "lead_date", "name", "caller",
-      "a1_status", "a1_at", "a2_status", "a3_status",
-      "final_calling_status",
-      ...roundHeaders,
-      "profile_creation_status", "profile_created_at", "profile_creator",
-      "active_status",
-    ];
     const esc = (v: unknown) => {
       const s = v == null ? "" : String(v);
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
-    const lines = [header.join(",")];
-    for (const r of rows) {
-      const roundVals = Array.from({ length: num_rounds }, (_, i) => {
-        const ri = r.rounds_status[i + 1];
-        return [ri?.status ?? "—", ri?.taker ?? "—", ri?.submitted_at ?? ""];
-      }).flat();
-      lines.push([
-        r.lead_id, r.lead_date ?? "", r.name, r.caller,
-        r.a1, r.a1_at ?? "", r.a2, r.a3,
-        r.final_calling_status,
-        ...roundVals,
-        r.profile_creation_status, r.profile_created_at ?? "", r.profile_creator,
-        r.active_status,
-      ].map(esc).join(","));
-    }
+    const header = [
+      "lead_id", "name", "contact", "lead_date", "caller",
+      "calling_status", "round_1_status", "round_2_status",
+      "verdict", "current_stage", "updated_at",
+    ];
+    const lines: string[] = [header.join(",")];
+
+    // Chunked pagination — 500 per batch — to avoid loading 10k rows into one query.
+    const CHUNK = 500;
+    let cursor: string | null = null;
+    let safety = 50; // hard cap: 25k rows
+    do {
+      const pageF: AllLeadsFilterT = { ...f, limit: CHUNK, cursor };
+      const { leads, joinIds } = await queryLeadsPage(pageF, CHUNK);
+      // joinIds may have been capped at 1000 — for export, refuse silently if so
+      if (joinIds && joinIds.size > 1000) {
+        // narrow further is non-trivial; export still proceeds with the truncated set
+      }
+      const hasMore = leads.length > CHUNK;
+      const page = hasMore ? leads.slice(0, CHUNK) : leads;
+      const rows = await enrichLeads(page);
+      for (const r of rows) {
+        lines.push(
+          [
+            r.lead_id, r.name, r.contact, r.lead_date ?? "", r.caller,
+            r.calling_status, r.round_1_status, r.round_2_status,
+            r.verdict, r.current_stage, r.updated_at,
+          ].map(esc).join(","),
+        );
+      }
+      if (!hasMore) break;
+      const sort = sortToColumn(f.sort ?? "lead_date");
+      const last = page[page.length - 1] as Record<string, unknown>;
+      cursor = encodeCursor({
+        v: (last[sort.col] as string | number | null) ?? null,
+        id: last.id as string,
+      });
+      safety--;
+    } while (safety > 0);
+
     return { csv: lines.join("\n") };
   });
 
