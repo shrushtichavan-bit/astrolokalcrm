@@ -2,7 +2,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { requireUser, requireRole } from "./auth.server";
+import { requireUser } from "./auth.server";
 import { appendAudit, transitionLead } from "./lead-helpers.server";
 
 // ---------- Helpers ----------
