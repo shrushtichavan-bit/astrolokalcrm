@@ -647,7 +647,7 @@ export const submitRound = createServerFn({ method: "POST" })
           submitted_at: new Date().toISOString(),
           total_score: total,
           remarks: data.remarks ?? null,
-          next_owner_email: isLastRound ? null : nextOwner,
+          next_owner_email: null,
         },
         { onConflict: "lead_id,round_number" },
       )
