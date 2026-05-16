@@ -3,6 +3,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { readTab, SHEETS_TABS } from "./sheets.server";
 import { hashPassword, requireRole } from "./auth.server";
+import { rebuildLeadDump, upsertLeadDumpInBackground } from "./lead-dump.server";
 
 const VALID_ROLES = new Set(["lma", "kam", "sme", "admin"]);
 const VALID_STAGES = new Set(["round_1", "round_2", "round_3", "round_4", "expert_creation"]);
