@@ -237,8 +237,14 @@ export const listMyLeads = createServerFn({ method: "GET" }).handler(async () =>
 export const getLead = createServerFn({ method: "GET" })
   .inputValidator((i: { id: string }) => z.object({ id: z.string().uuid() }).parse(i))
   .handler(async ({ data }) => {
-    const u = await requireUser();
-    const lead = await loadLeadOwned(data.id, u.email, { allowAssignee: true });
+    await requireUser();
+    const { data: lead, error: leadErr } = await supabaseAdmin
+      .from("leads")
+      .select("*")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (leadErr) throw leadErr;
+    if (!lead) throw new Error("Lead not found");
     const [{ data: attempts }, { data: status }, { data: rounds }, { data: profile }, { data: audit }] =
       await Promise.all([
         supabaseAdmin
