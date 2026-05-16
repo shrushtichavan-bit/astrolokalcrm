@@ -72,18 +72,14 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Astrolokal CRM" },
-      { name: "description", content: "Internal CRM for onboarding astrologer experts, managing leads from initial contact to platform activation." },
+      { title: "Lovable App" },
+      { name: "description", content: "Lovable Generated Project" },
       { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Astrolokal CRM" },
-      { property: "og:description", content: "Internal CRM for onboarding astrologer experts, managing leads from initial contact to platform activation." },
+      { property: "og:title", content: "Lovable App" },
+      { property: "og:description", content: "Lovable Generated Project" },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
       { name: "twitter:site", content: "@Lovable" },
-      { name: "twitter:title", content: "Astrolokal CRM" },
-      { name: "twitter:description", content: "Internal CRM for onboarding astrologer experts, managing leads from initial contact to platform activation." },
-      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/d2cac24f-71b9-4b00-97de-3eaa4f916c02/id-preview-f79df481--ea8e9b0f-f0d4-4316-8f75-ea20afa41105.lovable.app-1778881288947.png" },
-      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/d2cac24f-71b9-4b00-97de-3eaa4f916c02/id-preview-f79df481--ea8e9b0f-f0d4-4316-8f75-ea20afa41105.lovable.app-1778881288947.png" },
     ],
     links: [
       {
