@@ -209,6 +209,7 @@ function Dashboard() {
                             <div className="font-medium">{l.name}</div>
                             <div className="font-mono text-[11px] text-muted-foreground">
                               {l.lead_id}
+                              {l.lead_date && <span className="ml-2 text-muted-foreground/70">· {l.lead_date}</span>}
                             </div>
                           </td>
                           <td className="px-4 py-2">{l.contact}</td>
