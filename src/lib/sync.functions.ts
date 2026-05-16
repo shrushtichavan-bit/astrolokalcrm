@@ -4,7 +4,6 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { readTab, SHEETS_TABS } from "./sheets.server";
 import { hashPassword, requireRole } from "./auth.server";
 
-const VALID_ROLES = new Set(["lma", "kam", "sme", "admin"]);
 const VALID_STAGES = new Set(["round_1", "round_2", "round_3", "round_4", "expert_creation"]);
 
 /**
@@ -24,13 +23,9 @@ export const syncCredentials = createServerFn({ method: "POST" }).handler(async 
     const name = r.name?.trim();
     const email = r.email?.trim().toLowerCase();
     const password = r.password ?? "";
-    const role = r.role?.trim().toLowerCase();
-    if (!name || !email || !password || !role) {
+    const role = r.role?.trim().toLowerCase() || "user";
+    if (!name || !email || !password) {
       errors.push(`skip incomplete row for email=${email || "(blank)"}`);
-      continue;
-    }
-    if (!VALID_ROLES.has(role)) {
-      errors.push(`invalid role "${role}" for ${email}`);
       continue;
     }
     if (seenEmails.has(email)) {
