@@ -6,7 +6,7 @@ import { getCookie, getRequestHeader } from "@tanstack/react-start/server";
 const COOKIE_NAME = "astrolokal_session";
 const ALG = "HS256";
 
-export type Role = "telecaller" | "kam" | "expert_creation_agent";
+export type Role = "telecaller" | "kam" | "expert_creation_agent" | "admin";
 export interface SessionUser {
   id: string;
   email: string;
