@@ -346,47 +346,67 @@ export function upsertLeadDumpInBackground(leadId: string): void {
   });
 }
 
-/** Full rebuild: clear tab, write fresh header, write every lead in batches of 50. */
-export async function rebuildLeadDump(): Promise<{ leads_written: number; summary: string }> {
+/**
+ * Upsert many leads into the lead_dump sheet. Never clears. Never rewrites
+ * the header unless the sheet is completely empty. Existing rows are updated
+ * in place (matched by lead_id in column B); new rows are appended.
+ *
+ * mode: "all" → every lead in DB.
+ * mode: "changed" → leads with updated_at within the last `sinceMinutes`
+ *                    (default 20) plus any lead whose latest dependent row
+ *                    was changed in that window.
+ */
+export async function upsertManyLeadDump(opts: {
+  mode: "all" | "changed";
+  sinceMinutes?: number;
+} = { mode: "all" }): Promise<{ leads_written: number; new_rows: number; updated_rows: number; summary: string }> {
   const { numRounds, requiredRounds } = await getConfig();
   const header = buildHeader(numRounds);
 
-  const { data: leads } = await supabaseAdmin
+  // Resolve which leads to write.
+  let leadQuery = supabaseAdmin
     .from("leads")
-    .select("id, lead_id, name, contact, source, assigned_to_email, lead_date, current_stage")
+    .select("id, lead_id, name, contact, source, assigned_to_email, lead_date, current_stage, updated_at")
     .order("lead_date", { ascending: false })
     .limit(50000);
-  const leadList = (leads ?? []) as LeadRow[];
+  if (opts.mode === "changed") {
+    const since = new Date(Date.now() - (opts.sinceMinutes ?? 20) * 60_000).toISOString();
+    leadQuery = leadQuery.gte("updated_at", since);
+  }
+  const { data: leads } = await leadQuery;
+  const leadList = (leads ?? []) as (LeadRow & { updated_at?: string })[];
+
+  if (leadList.length === 0) {
+    return {
+      leads_written: 0,
+      new_rows: 0,
+      updated_rows: 0,
+      summary: opts.mode === "changed" ? "No leads changed since last run." : "No leads to write.",
+    };
+  }
+
   const leadIds = leadList.map((l) => l.id);
 
-  // Bulk fetch all related data in 4 queries.
+  // Bulk fetch dependent data in 4 queries.
   const [
     { data: attemptsAll },
     { data: statusAll },
     { data: roundsAll },
     { data: profilesAll },
   ] = await Promise.all([
-    leadIds.length
-      ? supabaseAdmin
-          .from("call_attempts")
-          .select("lead_id, attempt_number, outcome, connected, attempted_at")
-          .in("lead_id", leadIds)
-      : Promise.resolve({ data: [] }),
-    leadIds.length
-      ? supabaseAdmin.from("calling_status").select("lead_id, status, set_at").in("lead_id", leadIds)
-      : Promise.resolve({ data: [] }),
-    leadIds.length
-      ? supabaseAdmin
-          .from("interview_rounds")
-          .select("lead_id, round_number, conducted_by, started_at, submitted_at, total_score, passed")
-          .in("lead_id", leadIds)
-      : Promise.resolve({ data: [] }),
-    leadIds.length
-      ? supabaseAdmin
-          .from("expert_profiles")
-          .select("lead_id, expert_id, linked_by, linked_at, is_active, activated_at")
-          .in("lead_id", leadIds)
-      : Promise.resolve({ data: [] }),
+    supabaseAdmin
+      .from("call_attempts")
+      .select("lead_id, attempt_number, outcome, connected, attempted_at")
+      .in("lead_id", leadIds),
+    supabaseAdmin.from("calling_status").select("lead_id, status, set_at").in("lead_id", leadIds),
+    supabaseAdmin
+      .from("interview_rounds")
+      .select("lead_id, round_number, conducted_by, started_at, submitted_at, total_score, passed")
+      .in("lead_id", leadIds),
+    supabaseAdmin
+      .from("expert_profiles")
+      .select("lead_id, expert_id, linked_by, linked_at, is_active, activated_at")
+      .in("lead_id", leadIds),
   ]);
 
   const attemptsByLead = new Map<string, AttemptRow[]>();
@@ -406,33 +426,69 @@ export async function rebuildLeadDump(): Promise<{ leads_written: number; summar
   const profileByLead = new Map<string, ProfileRow>();
   for (const p of (profilesAll ?? []) as ProfileRow[]) profileByLead.set(p.lead_id, p);
 
-  const allRows: (string | number)[][] = leadList.map((l) =>
-    buildRow(
-      numRounds,
-      requiredRounds,
-      l,
-      attemptsByLead.get(l.id) ?? [],
-      statusByLead.get(l.id),
-      roundsByLead.get(l.id) ?? [],
-      profileByLead.get(l.id),
-    ),
-  );
+  const rowsByLeadId = new Map<string, (string | number)[]>();
+  for (const l of leadList) {
+    rowsByLeadId.set(
+      l.lead_id,
+      buildRow(
+        numRounds,
+        requiredRounds,
+        l,
+        attemptsByLead.get(l.id) ?? [],
+        statusByLead.get(l.id),
+        roundsByLead.get(l.id) ?? [],
+        profileByLead.get(l.id),
+      ),
+    );
+  }
 
-  // Clear, write header, then batch-append in chunks of 50 with a 1s gap.
-  await clearRange(TAB);
-  await writeRange(`${TAB}!A1`, [header], { valueInputOption: "RAW" });
+  // Ensure header exists if the sheet is completely empty.
+  const headerProbe = await readRange(`${TAB}!A1:A1`);
+  if (headerProbe.length === 0) {
+    await writeRange(`${TAB}!A1`, [header], { valueInputOption: "RAW" });
+  }
 
-  const BATCH = 50;
-  for (let i = 0; i < allRows.length; i += BATCH) {
-    const chunk = allRows.slice(i, i + BATCH);
-    await appendRange(`${TAB}!A:A`, chunk, { valueInputOption: "USER_ENTERED" });
-    if (i + BATCH < allRows.length) {
-      await new Promise((r) => setTimeout(r, 1000));
-    }
+  // Read column B (lead_id) to find existing rows.
+  const colB = await readRange(`${TAB}!B2:B`);
+  const rowByLeadId = new Map<string, number>();
+  for (let i = 0; i < colB.length; i++) {
+    const id = colB[i]?.[0];
+    if (id) rowByLeadId.set(String(id), i + 2);
+  }
+
+  // Partition into updates vs appends.
+  const updates: Array<{ range: string; values: (string | number)[][] }> = [];
+  const appends: (string | number)[][] = [];
+  for (const [leadId, row] of rowsByLeadId) {
+    const rowNum = rowByLeadId.get(leadId);
+    if (rowNum) updates.push({ range: `${TAB}!A${rowNum}`, values: [row] });
+    else appends.push(row);
+  }
+
+  // Batch updates in chunks of 100, ~1s between calls.
+  const BATCH = 100;
+  for (let i = 0; i < updates.length; i += BATCH) {
+    await batchUpdateValues(updates.slice(i, i + BATCH), { valueInputOption: "USER_ENTERED" });
+    if (i + BATCH < updates.length) await new Promise((r) => setTimeout(r, 1100));
+  }
+  // Append new rows in chunks of 50.
+  const APPEND_BATCH = 50;
+  for (let i = 0; i < appends.length; i += APPEND_BATCH) {
+    await appendRange(`${TAB}!A:A`, appends.slice(i, i + APPEND_BATCH), {
+      valueInputOption: "USER_ENTERED",
+    });
+    if (i + APPEND_BATCH < appends.length) await new Promise((r) => setTimeout(r, 1100));
   }
 
   return {
-    leads_written: allRows.length,
-    summary: `Lead dump updated. ${allRows.length} lead${allRows.length === 1 ? "" : "s"} written.`,
+    leads_written: updates.length + appends.length,
+    new_rows: appends.length,
+    updated_rows: updates.length,
+    summary: `Lead dump updated. ${appends.length} new, ${updates.length} updated.`,
   };
+}
+
+/** Back-compat alias used by daily cron and the manual button. */
+export async function rebuildLeadDump() {
+  return upsertManyLeadDump({ mode: "all" });
 }
