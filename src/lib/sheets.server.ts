@@ -105,6 +105,28 @@ export async function appendRange(
   }
 }
 
+/** Batch update many ranges in a single API call. */
+export async function batchUpdateValues(
+  data: Array<{ range: string; values: (string | number)[][] }>,
+  opts: { valueInputOption?: "RAW" | "USER_ENTERED" } = {},
+): Promise<void> {
+  if (data.length === 0) return;
+  const vio = opts.valueInputOption ?? "USER_ENTERED";
+  const url = `${GATEWAY_URL}/spreadsheets/${SPREADSHEET_ID}/values:batchUpdate`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      valueInputOption: vio,
+      data: data.map((d) => ({ range: d.range, majorDimension: "ROWS", values: d.values })),
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Sheets batchUpdate failed [${res.status}]: ${body}`);
+  }
+}
+
 /** Clear all values from a range/tab. */
 export async function clearRange(range: string): Promise<void> {
   const url = `${GATEWAY_URL}/spreadsheets/${SPREADSHEET_ID}/values/${range}:clear`;
