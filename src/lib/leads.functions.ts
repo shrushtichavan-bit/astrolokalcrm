@@ -118,6 +118,118 @@ export const listActiveExpertIds = createServerFn({ method: "GET" }).handler(asy
 
 // ---------- Telecaller actions ----------
 
+/**
+ * One-shot per-attempt logger. The telecaller picks an outcome for this call.
+ * Validates: attempt N is only allowed if attempt N-1 outcome was rnr/reconnect.
+ * Side-effects based on outcome:
+ *   connected         -> requires KAM in round_1 pool, transitions to round_1_pending
+ *   junk/not_interested -> terminal, transitions stage
+ *   rnr/reconnect     -> stays in calling bucket; on attempt 3 it's the final state
+ */
+export const logCallOutcome = createServerFn({ method: "POST" })
+  .inputValidator(
+    (i: {
+      lead_id: string;
+      attempt_number: number;
+      outcome: string;
+      remarks?: string | null;
+      assigned_kam_email?: string | null;
+    }) =>
+      z
+        .object({
+          lead_id: z.string().uuid(),
+          attempt_number: z.number().int().min(1).max(3),
+          outcome: z.enum(["connected", "rnr", "reconnect", "junk", "not_interested"]),
+          remarks: z.string().max(2000).nullish(),
+          assigned_kam_email: z.string().email().max(255).nullish(),
+        })
+        .parse(i),
+  )
+  .handler(async ({ data }) => {
+    const u = await requireRole("telecaller");
+    const lead = await loadLeadOwned(data.lead_id, u.email);
+    if (lead.current_stage !== "calling_pending")
+      throw new Error("Lead is not in calling stage");
+
+    // Load existing attempts in order
+    const { data: existing } = await supabaseAdmin
+      .from("call_attempts")
+      .select("attempt_number, outcome, connected")
+      .eq("lead_id", lead.id)
+      .order("attempt_number");
+    const rows = existing ?? [];
+
+    // Lead must not already be locked by a terminal outcome
+    const last = rows[rows.length - 1];
+    if (last) {
+      const lastOutcome = (last as { outcome?: string | null }).outcome
+        ?? (last.connected ? "connected" : "rnr");
+      if (["connected", "junk", "not_interested"].includes(lastOutcome))
+        throw new Error("Lead is already finalised — no more attempts allowed");
+      if (last.attempt_number >= 3)
+        throw new Error("All 3 attempts already logged");
+    }
+
+    // Sequence: attempt N must equal rows.length + 1
+    if (data.attempt_number !== rows.length + 1)
+      throw new Error(`Expected attempt #${rows.length + 1}, got #${data.attempt_number}`);
+
+    // KAM validation up-front for connected
+    let assignedKam: string | null = null;
+    if (data.outcome === "connected") {
+      if (!data.assigned_kam_email)
+        throw new Error("KAM assignment is required when Connected");
+      const pool = await poolMembers("round_1");
+      const target = data.assigned_kam_email.toLowerCase();
+      if (!pool.includes(target))
+        throw new Error("Selected KAM is not in the round_1 pool");
+      assignedKam = target;
+    }
+
+    // Insert attempt
+    const { error: aErr } = await supabaseAdmin.from("call_attempts").upsert(
+      {
+        lead_id: lead.id,
+        attempt_number: data.attempt_number,
+        connected: data.outcome === "connected",
+        outcome: data.outcome,
+        attempted_by: u.email,
+        attempted_at: new Date().toISOString(),
+      },
+      { onConflict: "lead_id,attempt_number" },
+    );
+    if (aErr) throw new Error(aErr.message);
+    await appendAudit(lead.id, `attempt_${data.attempt_number}:${data.outcome}`, u.email, {
+      remarks: data.remarks ?? null,
+    });
+
+    // Persist calling_status to reflect the most recent outcome (so the UI
+    // and dashboard buckets can read it cheaply).
+    const { error: csErr } = await supabaseAdmin.from("calling_status").upsert(
+      {
+        lead_id: lead.id,
+        status: data.outcome,
+        remarks: data.remarks ?? null,
+        assigned_kam_email: assignedKam,
+        set_by: u.email,
+        set_at: new Date().toISOString(),
+      },
+      { onConflict: "lead_id" },
+    );
+    if (csErr) throw new Error(csErr.message);
+
+    // Stage transitions
+    if (data.outcome === "connected") {
+      await transitionLead(lead.id, "round_1_pending", assignedKam!, u.email);
+    } else if (data.outcome === "junk" || data.outcome === "not_interested") {
+      await transitionLead(lead.id, data.outcome, lead.current_owner_email, u.email);
+    }
+    // rnr / reconnect → stay in calling_pending. After attempt 3 the lead is
+    // locked by the sequence check above, so no further attempts are accepted.
+
+    return { ok: true };
+  });
+
 export const logCallAttempt = createServerFn({ method: "POST" })
   .inputValidator((i: { lead_id: string; attempt_number: number; connected: boolean }) =>
     z
