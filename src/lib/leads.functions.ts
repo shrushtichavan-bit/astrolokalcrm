@@ -630,28 +630,11 @@ export const submitRound = createServerFn({ method: "POST" })
 
     const total = data.grades.reduce((sum, g) => sum + g.grade, 0);
 
-    // Determine if next round exists
+    // Determine if next round exists. Validation of next_owner_email is
+    // deferred until after scoring — a failing score skips the next round.
     const isLastRound = data.round_number >= cfg.num_rounds;
-    let nextStage: string;
-    let nextOwner: string;
-    if (!isLastRound) {
-      const nextStageKey = `round_${data.round_number + 1}` as
-        | "round_1"
-        | "round_2"
-        | "round_3"
-        | "round_4";
-      if (!data.next_owner_email)
-        throw new Error("next_owner_email is required when more rounds remain");
-      const pool = await poolMembers(nextStageKey);
-      const target = data.next_owner_email.toLowerCase();
-      if (!pool.includes(target))
-        throw new Error(`Selected owner is not in the ${nextStageKey} pool`);
-      nextStage = `round_${data.round_number + 1}_pending`;
-      nextOwner = target;
-    } else {
-      nextStage = ""; // computed below from verdict
-      nextOwner = "";
-    }
+    let nextStage = "";
+    let nextOwner = "";
 
     // Insert interview_round + grades
     const { data: roundRow, error: roundErr } = await supabaseAdmin
@@ -664,7 +647,7 @@ export const submitRound = createServerFn({ method: "POST" })
           submitted_at: new Date().toISOString(),
           total_score: total,
           remarks: data.remarks ?? null,
-          next_owner_email: isLastRound ? null : nextOwner,
+          next_owner_email: null,
         },
         { onConflict: "lead_id,round_number" },
       )
@@ -683,13 +666,48 @@ export const submitRound = createServerFn({ method: "POST" })
       })),
     );
 
-    // Stage transition
+    // Per-round pass check: if this round's score is below passing marks,
+    // mark lead failed immediately — do not proceed to next round.
+    const thisRoundPass = marksMap.get(data.round_number);
+    const roundPassed = thisRoundPass == null ? true : total >= thisRoundPass;
+
+    if (!roundPassed) {
+      await supabaseAdmin
+        .from("interview_rounds")
+        .update({ passed: false, next_owner_email: null })
+        .eq("lead_id", lead.id)
+        .eq("round_number", data.round_number);
+      await transitionLead(lead.id, "failed", lead.current_owner_email, u.email, {
+        verdict: "failed",
+        round_number: data.round_number,
+        total_score: total,
+        reason: `Score ${total} below passing ${thisRoundPass} for round ${data.round_number}`,
+      });
+      return { ok: true, total_score: total, verdict: "failed" as const };
+    }
+
+    // Stage transition for passed non-final round
     if (!isLastRound) {
+      const nextStageKey = `round_${data.round_number + 1}` as
+        | "round_1" | "round_2" | "round_3" | "round_4";
+      if (!data.next_owner_email)
+        throw new Error("next_owner_email is required when more rounds remain");
+      const pool = await poolMembers(nextStageKey);
+      const target = data.next_owner_email.toLowerCase();
+      if (!pool.includes(target))
+        throw new Error(`Selected owner is not in the ${nextStageKey} pool`);
+      nextStage = `${nextStageKey}_pending`;
+      nextOwner = target;
+      await supabaseAdmin
+        .from("interview_rounds")
+        .update({ passed: true, next_owner_email: nextOwner })
+        .eq("lead_id", lead.id)
+        .eq("round_number", data.round_number);
       await transitionLead(lead.id, nextStage, nextOwner, u.email, {
         round_number: data.round_number,
         total_score: total,
       });
-      return { ok: true, total_score: total, verdict: null as null | "passed" | "failed" };
+      return { ok: true, total_score: total, verdict: "passed" as const };
     }
 
     // Final round → compute verdict
