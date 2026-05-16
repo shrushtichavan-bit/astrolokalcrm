@@ -143,7 +143,7 @@ function SyncPage() {
         </div>
 
         <p className="text-[13px] text-[#6B6B6B]">
-          Sync leads every day after the admin uploads the new leads sheet.
+          Background sync runs every 15 minutes for all five jobs. You don't need to click anything — these buttons just force an immediate refresh.
         </p>
       </div>
     </AppShell>
