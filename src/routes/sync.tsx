@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { getMe } from "@/lib/me.functions";
-import { syncCredentials, syncConfig, syncLeads, syncActiveExperts } from "@/lib/sync.functions";
+import { syncCredentials, syncConfig, syncLeads, syncActiveExperts, writeLeadDump } from "@/lib/sync.functions";
 import { AppShell } from "@/components/AppShell";
 
 export const Route = createFileRoute("/sync")({
