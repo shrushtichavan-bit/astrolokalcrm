@@ -804,6 +804,7 @@ export const linkExpertProfile = createServerFn({ method: "POST" })
     await transitionLead(lead.id, "profile_created", lead.current_owner_email, u.email, {
       expert_id: data.expert_id,
     });
+    upsertLeadDumpInBackground(lead.id);
     return { ok: true };
   });
 
