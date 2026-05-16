@@ -688,9 +688,19 @@ export const submitRound = createServerFn({ method: "POST" })
 
     // Stage transition for passed non-final round
     if (!isLastRound) {
+      const nextStageKey = `round_${data.round_number + 1}` as
+        | "round_1" | "round_2" | "round_3" | "round_4";
+      if (!data.next_owner_email)
+        throw new Error("next_owner_email is required when more rounds remain");
+      const pool = await poolMembers(nextStageKey);
+      const target = data.next_owner_email.toLowerCase();
+      if (!pool.includes(target))
+        throw new Error(`Selected owner is not in the ${nextStageKey} pool`);
+      nextStage = `${nextStageKey}_pending`;
+      nextOwner = target;
       await supabaseAdmin
         .from("interview_rounds")
-        .update({ passed: true })
+        .update({ passed: true, next_owner_email: nextOwner })
         .eq("lead_id", lead.id)
         .eq("round_number", data.round_number);
       await transitionLead(lead.id, nextStage, nextOwner, u.email, {
