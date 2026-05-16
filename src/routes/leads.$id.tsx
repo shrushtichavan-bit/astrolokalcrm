@@ -82,7 +82,7 @@ function LeadDetail() {
       {!errMsg && leadQ.data && (
         <div className="grid gap-6 lg:grid-cols-[2fr_3fr]">
           <LeadSummary data={leadQ.data} />
-          <ActionsPanel data={leadQ.data} role={user.role} onChanged={refresh} />
+          <ActionsPanel data={leadQ.data} userEmail={user.email} onChanged={refresh} />
         </div>
       )}
     </AppShell>
@@ -198,9 +198,48 @@ function Row({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
   );
 }
 
-function ActionsPanel({ data, role, onChanged }: { data: LeadData; role: string; onChanged: () => void }) {
-  void role;
+function ActionsPanel({ data, userEmail, onChanged }: { data: LeadData; userEmail: string; onChanged: () => void }) {
   const stage = data.lead.current_stage;
+  const isOwner = data.lead.current_owner_email === userEmail;
+
+  // If lead has been passed on (I'm no longer current owner), show passed card.
+  if (!isOwner) {
+    const forLabel =
+      stage === "calling_pending"
+        ? "Calling"
+        : stage === "profile_creation_pending"
+        ? "Expert Creation"
+        : stage.startsWith("round_") && stage.endsWith("_pending")
+        ? `Round ${stage.replace(/[^0-9]/g, "")}`
+        : stage;
+    return (
+      <Card>
+        <CardContent className="space-y-3 p-6">
+          <div className="flex items-center gap-2 text-base font-medium">
+            <span className="text-green-600">✅</span> Lead Passed
+          </div>
+          <div className="space-y-1 text-sm">
+            <div>
+              <span className="text-muted-foreground">Assigned to: </span>
+              <strong>{data.lead.current_owner_email}</strong>
+            </div>
+            <div>
+              <span className="text-muted-foreground">For: </span>
+              <strong>{forLabel}</strong>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Passed on: </span>
+              {new Date(data.lead.updated_at).toLocaleString()}
+            </div>
+          </div>
+          <p className="pt-2 text-sm text-muted-foreground">
+            Your work on this lead is done.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
   if (stage === "calling_pending") {
     return <CallingActions data={data} onChanged={onChanged} />;
   }
@@ -403,15 +442,14 @@ function RoundActions({ data, round, onChanged }: { data: LeadData; round: numbe
     queryKey: ["round-questions", lead.id, round],
     queryFn: () => startFn({ data: { lead_id: lead.id, round_number: round } }),
   });
-  const nextStageKey = `round_${round + 1}` as "round_2" | "round_3" | "round_4";
+  const numRounds = data.cfg.num_rounds;
+  const isLastRound = round >= numRounds;
+  const nextStage: "round_2" | "round_3" | "round_4" | "expert_creation" = isLastRound
+    ? "expert_creation"
+    : (`round_${round + 1}` as "round_2" | "round_3" | "round_4");
   const poolQ = useQuery({
-    queryKey: ["pool", nextStageKey === "round_2" || nextStageKey === "round_3" || nextStageKey === "round_4" ? nextStageKey : "expert_creation"],
-    queryFn: () =>
-      fetchPool({
-        data: {
-          stage: round < 4 ? nextStageKey : "expert_creation",
-        },
-      }),
+    queryKey: ["pool", nextStage],
+    queryFn: () => fetchPool({ data: { stage: nextStage } }),
   });
 
   const [grades, setGrades] = useState<Record<string, number>>({});
@@ -465,7 +503,7 @@ function RoundActions({ data, round, onChanged }: { data: LeadData; round: numbe
           <Textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2} />
         </div>
         <div>
-          <Label>{round < 4 ? `Next round owner (round_${round + 1} pool)` : "Expert Creation Agent (if passed)"}</Label>
+          <Label>{isLastRound ? "Expert Creation Agent (if passed)" : `Next round owner (round_${round + 1} pool)`}</Label>
           <Select value={nextOwner} onValueChange={setNextOwner}>
             <SelectTrigger><SelectValue placeholder="Choose owner" /></SelectTrigger>
             <SelectContent>

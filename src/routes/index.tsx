@@ -1,12 +1,13 @@
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { getMe } from "@/lib/me.functions";
 import { listMyLeads, getLead } from "@/lib/leads.functions";
 import { AppShell } from "@/components/AppShell";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+
 
 export const Route = createFileRoute("/")({
   beforeLoad: async () => {
@@ -27,43 +28,7 @@ const STAGE_LABELS: Record<string, string> = {
   round_3_pending: "Round 3 Pending",
   round_4_pending: "Round 4 Pending",
   profile_creation_pending: "Expert Profile Creation Pending",
-  profile_created: "Profile Created",
-  active: "Active",
-  failed: "Failed",
-  junk: "Junk",
-  not_interested: "Not Interested",
 };
-
-const PENDING_STAGES = new Set([
-  "calling_pending_1",
-  "calling_pending_2",
-  "calling_pending_3",
-  "round_1_pending",
-  "round_2_pending",
-  "round_3_pending",
-  "round_4_pending",
-  "profile_creation_pending",
-]);
-
-type Lead = {
-  id: string;
-  lead_id: string;
-  name: string;
-  contact: string;
-  source: string | null;
-  priority: number;
-  current_stage: string;
-  updated_at: string;
-  attempts_logged?: number;
-};
-
-function deriveBucket(l: Lead): string {
-  if (l.current_stage === "calling_pending") {
-    const n = (l.attempts_logged ?? 0) + 1;
-    return `calling_pending_${Math.min(n, 3)}`;
-  }
-  return l.current_stage;
-}
 
 function Dashboard() {
   const { user } = Route.useLoaderData();
@@ -76,6 +41,7 @@ function Dashboard() {
     staleTime: 30_000,
     placeholderData: (prev) => prev,
   });
+  const [doneOpen, setDoneOpen] = useState(false);
 
   function prefetchLead(id: string) {
     qc.prefetchQuery({
@@ -85,29 +51,43 @@ function Dashboard() {
     });
   }
 
-  const { grouped, pendingCount, totalCount, pendingByStage } = useMemo(() => {
-    const leads = (leadsQ.data?.leads ?? []) as Lead[];
-    const g: Record<string, Lead[]> = {};
-    const pbs: Record<string, number> = {};
-    let pending = 0;
-    for (const l of leads) {
-      const bucket = deriveBucket(l);
-      (g[bucket] ||= []).push(l);
-      if (PENDING_STAGES.has(bucket)) {
-        pending++;
-        pbs[bucket] = (pbs[bucket] ?? 0) + 1;
-      }
-    }
-    return { grouped: g, pendingCount: pending, totalCount: leads.length, pendingByStage: pbs };
-  }, [leadsQ.data]);
+  const active = leadsQ.data?.active ?? [];
+  const done = leadsQ.data?.done ?? [];
+  const summary = leadsQ.data?.summary;
+  const numRounds = leadsQ.data?.cfg.num_rounds ?? 2;
 
-  const pendingStages = Object.keys(pendingByStage).sort();
-  const groupedKeys = Object.keys(grouped).sort((a, b) => {
-    const ap = PENDING_STAGES.has(a) ? 0 : 1;
-    const bp = PENDING_STAGES.has(b) ? 0 : 1;
-    if (ap !== bp) return ap - bp;
-    return a.localeCompare(b);
-  });
+  const { grouped, bucketOrder } = useMemo(() => {
+    const g: Record<string, typeof active> = {};
+    for (const l of active) (g[l.bucket] ||= []).push(l);
+    const order = [
+      "calling_pending_1",
+      "calling_pending_2",
+      "calling_pending_3",
+      ...Array.from({ length: numRounds }, (_, i) => `round_${i + 1}_pending`),
+      "profile_creation_pending",
+    ];
+    return { grouped: g, bucketOrder: order.filter((k) => g[k]?.length) };
+  }, [active, numRounds]);
+
+  const summaryRows: Array<{ label: string; pending: number; done: number }> = [];
+  if (summary) {
+    for (let n = 1; n <= 3; n++) {
+      const p = grouped[`calling_pending_${n}`]?.length ?? 0;
+      const d = summary.attemptDone[String(n)] ?? 0;
+      if (p > 0 || d > 0) summaryRows.push({ label: `Attempt ${n}`, pending: p, done: d });
+    }
+    for (let n = 1; n <= numRounds; n++) {
+      const p = grouped[`round_${n}_pending`]?.length ?? 0;
+      const d = summary.roundDone[String(n)] ?? 0;
+      if (p > 0 || d > 0) summaryRows.push({ label: `Round ${n}`, pending: p, done: d });
+    }
+    const ep = grouped["profile_creation_pending"]?.length ?? 0;
+    const ed = summary.expertDone;
+    if (ep > 0 || ed > 0)
+      summaryRows.push({ label: "Expert Creation", pending: ep, done: ed });
+  }
+
+  const totalPending = active.length;
 
   return (
     <AppShell user={user}>
@@ -119,27 +99,31 @@ function Dashboard() {
           <p className="text-sm text-muted-foreground">
             {leadsQ.isLoading
               ? "Loading your leads…"
-              : pendingCount === 0
-              ? `You're all caught up. ${totalCount} lead${totalCount === 1 ? "" : "s"} assigned.`
-              : `${pendingCount} pending of ${totalCount} assigned to you.`}
+              : totalPending === 0
+              ? "You're all caught up."
+              : `${totalPending} pending action${totalPending === 1 ? "" : "s"}.`}
           </p>
         </section>
 
-        {pendingStages.length > 0 && (
-          <section className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-            {pendingStages.map((s) => (
-              <Card key={s} className="border-primary/20">
-                <CardContent className="p-4">
-                  <div className="text-xs uppercase tracking-wide text-muted-foreground">
-                    {STAGE_LABELS[s] ?? s}
-                  </div>
-                  <div className="mt-1 text-3xl font-semibold tabular-nums">
-                    {pendingByStage[s]}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </section>
+        {summaryRows.length > 0 && (
+          <Card>
+            <CardContent className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 md:grid-cols-3">
+              {summaryRows.map((row) => (
+                <div
+                  key={row.label}
+                  className="flex items-center justify-between rounded-md border bg-background px-3 py-2"
+                >
+                  <span className="text-sm font-medium">{row.label}</span>
+                  <span className="text-xs text-muted-foreground">
+                    Pending:{" "}
+                    <strong className="text-foreground tabular-nums">{row.pending}</strong>{" "}
+                    · Done:{" "}
+                    <strong className="text-foreground tabular-nums">{row.done}</strong>
+                  </span>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
         )}
 
         <section className="space-y-4">
@@ -148,15 +132,19 @@ function Dashboard() {
               {(leadsQ.error as Error).message}
             </div>
           )}
-          {leadsQ.data && leadsQ.data.leads.length === 0 && (
+          {!leadsQ.isLoading && bucketOrder.length === 0 && done.length === 0 && (
             <div className="rounded-md border bg-background p-8 text-center text-sm text-muted-foreground">
               No leads assigned to you yet.
             </div>
           )}
 
-          {groupedKeys.map((stage) => {
+          {bucketOrder.length > 0 && (
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Pending
+            </div>
+          )}
+          {bucketOrder.map((stage) => {
             const leads = grouped[stage];
-            const isPending = PENDING_STAGES.has(stage);
             return (
               <Card key={stage}>
                 <div className="flex items-center justify-between border-b px-4 py-3">
@@ -164,11 +152,9 @@ function Dashboard() {
                     <span className="text-sm font-medium">
                       {STAGE_LABELS[stage] ?? stage}
                     </span>
-                    {isPending && (
-                      <Badge variant="default" className="h-5 px-1.5 text-[10px]">
-                        Action needed
-                      </Badge>
-                    )}
+                    <Badge variant="default" className="h-5 px-1.5 text-[10px]">
+                      Action needed
+                    </Badge>
                   </div>
                   <Badge variant="secondary">{leads.length}</Badge>
                 </div>
@@ -221,6 +207,48 @@ function Dashboard() {
               </Card>
             );
           })}
+
+          {done.length > 0 && (
+            <Card>
+              <button
+                type="button"
+                onClick={() => setDoneOpen((v) => !v)}
+                className="flex w-full items-center justify-between border-b px-4 py-3 text-left hover:bg-muted/30"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">Done</span>
+                  <Badge variant="secondary">{done.length}</Badge>
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  {doneOpen ? "▲ Hide" : "▼ Show"}
+                </span>
+              </button>
+              {doneOpen && (
+                <CardContent className="p-0">
+                  <ul className="divide-y text-sm">
+                    {done.map((d) => (
+                      <li
+                        key={d.id}
+                        className="flex items-center justify-between gap-3 px-4 py-2"
+                      >
+                        <div className="min-w-0">
+                          <div className="font-medium">{d.name}</div>
+                          <div className="text-xs text-muted-foreground">{d.label}</div>
+                        </div>
+                        <Link
+                          to="/leads/$id"
+                          params={{ id: d.id }}
+                          className="shrink-0 text-xs font-medium text-primary hover:underline"
+                        >
+                          View
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </CardContent>
+              )}
+            </Card>
+          )}
         </section>
       </div>
     </AppShell>
