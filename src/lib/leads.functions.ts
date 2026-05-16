@@ -58,7 +58,7 @@ export const listMyLeads = createServerFn({ method: "GET" }).handler(async () =>
   // 1. Leads currently owned by me
   const { data: ownedRaw, error } = await supabaseAdmin
     .from("leads")
-    .select("id, lead_id, name, contact, source, priority, current_stage, current_owner_email, assigned_to_email, updated_at")
+    .select("id, lead_id, name, contact, source, priority, current_stage, current_owner_email, assigned_to_email, updated_at, lead_date")
     .eq("current_owner_email", me)
     .order("priority", { ascending: true })
     .order("updated_at", { ascending: false })
