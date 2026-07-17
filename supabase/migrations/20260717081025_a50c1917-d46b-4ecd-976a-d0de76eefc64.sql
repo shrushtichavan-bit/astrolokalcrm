@@ -1,0 +1,1 @@
+REVOKE EXECUTE ON FUNCTION public.cleanup_old_audit_log() FROM PUBLIC, anon, authenticated;
