@@ -166,15 +166,29 @@ export const syncLeads = createServerFn({ method: "POST" }).handler(async () => 
   return { new: inserted, updated, unchanged, total: rows.length, errors, summary };
 });
 
-/** Parse DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD, or YYYY/MM/DD into ISO date. */
+/** Parse DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD, YYYY/MM/DD, or YYYY-DD-MM into ISO date. */
 function parseLeadDate(raw: string | undefined | null): string | null {
   if (!raw) return null;
   const s = String(raw).trim();
   if (!s) return null;
+  const build = (y: string, mo: number, d: number): string | null => {
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+    return `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  };
+  // YYYY-?-? — try MM-DD first, fall back to DD-MM if month is out of range.
   let m = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
-  if (m) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+  if (m) {
+    const a = parseInt(m[2], 10);
+    const b = parseInt(m[3], 10);
+    return build(m[1], a, b) ?? build(m[1], b, a);
+  }
+  // DD-?-YYYY — try DD-MM first, fall back to MM-DD if month is out of range.
   m = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
-  if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  if (m) {
+    const a = parseInt(m[1], 10);
+    const b = parseInt(m[2], 10);
+    return build(m[3], b, a) ?? build(m[3], a, b);
+  }
   return null;
 }
 
