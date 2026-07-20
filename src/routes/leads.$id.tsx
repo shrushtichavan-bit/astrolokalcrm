@@ -7,7 +7,6 @@ import { ChevronLeft, Check } from "lucide-react";
 import { getMe } from "@/lib/me.functions";
 import {
   getLead,
-  getPool,
   logCallOutcome,
   startRound,
   submitRound,
@@ -16,7 +15,13 @@ import {
 } from "@/lib/leads.functions";
 import { AppShell } from "@/components/AppShell";
 import { StatusPill, type StatusKind } from "@/components/StatusPill";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export const Route = createFileRoute("/leads/$id")({
   beforeLoad: async () => {
@@ -40,12 +45,19 @@ function formatContact(c: string): string {
 function fmtDateTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
+  return d.toLocaleString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 function stageToPill(stage: string): { kind: StatusKind; label: string } {
   if (stage === "calling_pending") return { kind: "pending", label: "Calling pending" };
-  if (stage === "profile_creation_pending") return { kind: "pending", label: "Profile creation pending" };
+  if (stage === "profile_creation_pending")
+    return { kind: "pending", label: "Profile creation pending" };
   const m = stage.match(/^round_(\d+)_pending$/);
   if (m) return { kind: "pending", label: `Round ${m[1]} pending` };
   if (stage === "active") return { kind: "active", label: "Active" };
@@ -117,7 +129,8 @@ function LeadDetail() {
   }
 
   const errMsg = leadQ.error ? (leadQ.error as Error).message : null;
-  const isForbidden = errMsg?.toLowerCase().includes("not your lead") || errMsg?.toLowerCase().includes("forbidden");
+  const isForbidden =
+    errMsg?.toLowerCase().includes("not your lead") || errMsg?.toLowerCase().includes("forbidden");
 
   return (
     <AppShell user={user}>
@@ -144,9 +157,7 @@ function LeadDetail() {
             {isForbidden ? "This lead is no longer assigned to you" : "Couldn't load this lead"}
           </div>
           <p className="mt-2 text-[14px] text-[#6B6B6B]">
-            {isForbidden
-              ? "It may have been moved to another stage or owner."
-              : errMsg}
+            {isForbidden ? "It may have been moved to another stage or owner." : errMsg}
           </p>
           <Link
             to="/"
@@ -159,7 +170,9 @@ function LeadDetail() {
         </div>
       )}
 
-      {!errMsg && leadQ.data && <LeadView data={leadQ.data} userEmail={user.email} onChanged={refresh} />}
+      {!errMsg && leadQ.data && (
+        <LeadView data={leadQ.data} userEmail={user.email} onChanged={refresh} />
+      )}
     </AppShell>
   );
 }
@@ -190,101 +203,250 @@ function LeadHeader({ data }: { data: LeadData }) {
   );
 }
 
-function LeadView({ data, userEmail, onChanged }: { data: LeadData; userEmail: string; onChanged: () => void }) {
+function LeadView({
+  data,
+  userEmail,
+  onChanged,
+}: {
+  data: LeadData;
+  userEmail: string;
+  onChanged: () => void;
+}) {
   return (
     <div className="space-y-4">
       <LeadHeader data={data} />
-      <CompletedTimeline data={data} />
+      <LeadTimeline data={data} />
       <ActionsPanel data={data} userEmail={userEmail} onChanged={onChanged} />
     </div>
   );
 }
 
-function CompletedTimeline({ data }: { data: LeadData }) {
-  const { attempts, rounds, profile } = data;
+const OUTCOME_LABELS: Record<string, string> = {
+  connected: "Connected",
+  rnr: "RNR",
+  reconnect: "Reconnect",
+  junk: "Junk",
+  not_interested: "Not Interested",
+};
+
+type TimelineState = "done" | "current" | "future";
+type TimelineItem = {
+  id: string;
+  title: string;
+  subtitle: string;
+  state: TimelineState;
+  pill: StatusKind;
+  pillLabel: string;
+  assignedTo?: string | null;
+  details?: React.ReactNode;
+};
+
+/**
+ * Full lead journey — created, calling, each round, expert creation. Past
+ * stages show outcomes/timestamps, the current stage is expanded, future
+ * stages show the pre-assigned person (from lead_stage_assignments) greyed out.
+ */
+function LeadTimeline({ data }: { data: LeadData }) {
+  const { lead, attempts, rounds, profile, assignments } = data;
   const [openId, setOpenId] = useState<string | null>(null);
+  const numRounds = data.cfg.num_rounds;
 
-  const OUTCOME_LABELS: Record<string, string> = {
-    connected: "Connected",
-    rnr: "RNR",
-    reconnect: "Reconnect",
-    junk: "Junk",
-    not_interested: "Not Interested",
-  };
+  const assignedByStage = new Map((assignments ?? []).map((a) => [a.stage, a.assigned_email]));
 
-  const items: Array<{ id: string; title: string; subtitle: string; pill: StatusKind; pillLabel: string; details: React.ReactNode }> = [];
+  const items: TimelineItem[] = [];
 
-  for (const a of attempts) {
-    const o = (a as { outcome?: string | null }).outcome ?? (a.connected ? "connected" : "rnr");
+  // 1. Created
+  items.push({
+    id: "created",
+    title: "Lead Created",
+    subtitle: fmtDateTime(lead.lead_date ?? lead.created_at),
+    state: "done",
+    pill: "done",
+    pillLabel: "Created",
+    details: (
+      <div className="space-y-1 text-[14px] text-[#6B6B6B]">
+        <div>
+          Source: <span className="font-medium text-[#1A1A1A]">{lead.source ?? "Direct"}</span>
+        </div>
+        <div>
+          Priority: <span className="font-medium text-[#1A1A1A]">{lead.priority}</span>
+        </div>
+      </div>
+    ),
+  });
+
+  // 2. Calling
+  const sortedAttempts = [...attempts].sort((a, b) => a.attempt_number - b.attempt_number);
+  const lastAttempt = sortedAttempts[sortedAttempts.length - 1] as
+    | ((typeof sortedAttempts)[number] & { outcome?: string | null; remarks?: string | null })
+    | undefined;
+  const callingState: TimelineState = lead.current_stage === "calling_pending" ? "current" : "done";
+  const callingOutcome = lastAttempt
+    ? (lastAttempt.outcome ?? (lastAttempt.connected ? "connected" : "rnr"))
+    : null;
+  items.push({
+    id: "calling",
+    title: "Calling",
+    subtitle: lastAttempt ? fmtDateTime(lastAttempt.attempted_at) : "No attempts yet",
+    state: callingState,
+    pill: callingOutcome ? (callingOutcome as StatusKind) : "pending",
+    pillLabel: callingOutcome ? (OUTCOME_LABELS[callingOutcome] ?? callingOutcome) : "Pending",
+    assignedTo: assignedByStage.get("calling") ?? lead.assigned_to_email,
+    details: (
+      <div className="space-y-2 text-[14px] text-[#6B6B6B]">
+        <div>
+          Assigned to:{" "}
+          <span className="font-medium text-[#1A1A1A]">
+            {assignedByStage.get("calling") ?? lead.assigned_to_email}
+          </span>
+        </div>
+        {sortedAttempts.length === 0 && <div>No attempts logged yet.</div>}
+        {sortedAttempts.map((a) => {
+          const o =
+            (a as { outcome?: string | null }).outcome ?? (a.connected ? "connected" : "rnr");
+          return (
+            <div key={a.id} className="border-t border-[#F0F0F0] pt-2 first:border-t-0 first:pt-0">
+              <div>
+                Attempt {a.attempt_number}:{" "}
+                <span className="font-medium text-[#1A1A1A]">{OUTCOME_LABELS[o] ?? o}</span>
+                {" · "}
+                {fmtDateTime(a.attempted_at)}
+              </div>
+              {(a as { remarks?: string | null }).remarks && (
+                <div>Notes: {(a as { remarks?: string | null }).remarks}</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    ),
+  });
+
+  // 3..N+2. Rounds
+  for (let n = 1; n <= numRounds; n++) {
+    const round = rounds.find((r) => r.round_number === n);
+    const stageKey = `round_${n}`;
+    const assignedTo = assignedByStage.get(stageKey);
+    let state: TimelineState;
+    let pill: StatusKind;
+    let pillLabel: string;
+    if (round?.submitted_at) {
+      state = "done";
+      pill = round.passed === true ? "passed" : round.passed === false ? "failed" : "pending";
+      pillLabel =
+        round.passed === true ? "Passed" : round.passed === false ? "Failed" : "Submitted";
+    } else if (lead.current_stage === `${stageKey}_pending`) {
+      state = "current";
+      pill = "pending";
+      pillLabel = "In progress";
+    } else {
+      state = "future";
+      pill = "neutral";
+      pillLabel = "Not started";
+    }
     items.push({
-      id: `att-${a.id}`,
-      title: `Attempt ${a.attempt_number}`,
-      subtitle: fmtDateTime(a.attempted_at),
-      pill: (o as StatusKind),
-      pillLabel: OUTCOME_LABELS[o] ?? o,
+      id: stageKey,
+      title: `Round ${n}`,
+      subtitle: round?.submitted_at ? fmtDateTime(round.submitted_at) : "",
+      state,
+      pill,
+      pillLabel,
+      assignedTo: assignedTo ?? null,
       details: (
         <div className="space-y-1 text-[14px] text-[#6B6B6B]">
-          <div>Outcome: <span className="font-medium text-[#1A1A1A]">{OUTCOME_LABELS[o] ?? o}</span></div>
-          {(a as { remarks?: string | null }).remarks && <div>Notes: {(a as { remarks?: string | null }).remarks}</div>}
+          <div>
+            {state === "future" ? "Pre-assigned to" : "Conducted by"}:{" "}
+            <span className="font-medium text-[#1A1A1A]">
+              {round?.conducted_by ?? assignedTo ?? "Not assigned yet"}
+            </span>
+          </div>
+          {round?.total_score != null && (
+            <div>
+              Score: <span className="font-medium text-[#1A1A1A]">{round.total_score}</span>
+            </div>
+          )}
+          {round?.remarks && <div>Notes: {round.remarks}</div>}
         </div>
       ),
     });
   }
-  for (const r of rounds) {
-    const kind: StatusKind = r.passed === true ? "passed" : r.passed === false ? "failed" : "pending";
-    items.push({
-      id: `r-${r.id}`,
-      title: `Round ${r.round_number}`,
-      subtitle: r.conducted_by ? `by ${r.conducted_by}` : "",
-      pill: kind,
-      pillLabel: r.passed === true ? "Passed" : r.passed === false ? "Failed" : "Submitted",
-      details: (
-        <div className="space-y-1 text-[14px] text-[#6B6B6B]">
-          <div>Conducted by: <span className="font-medium text-[#1A1A1A]">{r.conducted_by}</span></div>
-          {r.total_score != null && <div>Score: <span className="font-medium text-[#1A1A1A]">{r.total_score}</span></div>}
-          {r.remarks && <div>Notes: {r.remarks}</div>}
-        </div>
-      ),
-    });
-  }
+
+  // Last. Expert Creation
+  const assignedCreation = assignedByStage.get("expert_creation");
+  let creationState: TimelineState;
+  let creationPill: StatusKind;
+  let creationLabel: string;
   if (profile) {
-    items.push({
-      id: `p-${profile.expert_id}`,
-      title: "Expert Profile Created",
-      subtitle: profile.activated_at ? fmtDateTime(profile.activated_at) : "",
-      pill: profile.is_active ? "active" : "inactive",
-      pillLabel: profile.is_active ? "Active" : "Inactive",
-      details: (
-        <div className="space-y-1 text-[14px] text-[#6B6B6B]">
-          <div>Expert ID: <span className="font-mono text-[#1A1A1A]">{profile.expert_id}</span></div>
-        </div>
-      ),
-    });
+    creationState = "done";
+    creationPill = profile.is_active ? "active" : "inactive";
+    creationLabel = profile.is_active ? "Active" : "Inactive";
+  } else if (lead.current_stage === "profile_creation_pending") {
+    creationState = "current";
+    creationPill = "pending";
+    creationLabel = "In progress";
+  } else {
+    creationState = "future";
+    creationPill = "neutral";
+    creationLabel = "Not started";
   }
-
-  if (items.length === 0) return null;
+  items.push({
+    id: "expert_creation",
+    title: "Expert Creation",
+    subtitle: profile?.activated_at ? fmtDateTime(profile.activated_at) : "",
+    state: creationState,
+    pill: creationPill,
+    pillLabel: creationLabel,
+    assignedTo: assignedCreation ?? null,
+    details: (
+      <div className="space-y-1 text-[14px] text-[#6B6B6B]">
+        <div>
+          {creationState === "future" ? "Pre-assigned to" : "Assigned to"}:{" "}
+          <span className="font-medium text-[#1A1A1A]">
+            {profile?.linked_by ?? assignedCreation ?? "Not assigned yet"}
+          </span>
+        </div>
+        {profile && (
+          <div>
+            Expert ID: <span className="font-mono text-[#1A1A1A]">{profile.expert_id}</span>
+          </div>
+        )}
+      </div>
+    ),
+  });
 
   return (
     <div className="space-y-2">
       <SectionLabel>Timeline</SectionLabel>
       {items.map((it) => {
-        const open = openId === it.id;
+        const open = openId === it.id || it.state === "current";
+        const future = it.state === "future";
         return (
           <div
             key={it.id}
-            className="overflow-hidden rounded-[10px] border border-[#EBEBEB] bg-white"
+            className={`overflow-hidden rounded-[10px] border bg-white ${
+              it.state === "current" ? "border-[#F45722]" : "border-[#EBEBEB]"
+            } ${future ? "opacity-60" : ""}`}
           >
             <button
               type="button"
-              onClick={() => setOpenId(open ? null : it.id)}
+              onClick={() => setOpenId(open && openId === it.id ? null : it.id)}
               className="flex w-full items-center justify-between gap-3 px-5 py-3 text-left transition-colors duration-150 hover:bg-[#F9F9F9]"
             >
               <div className="flex items-center gap-3">
-                <Check size={16} className="text-[#22A55B]" />
+                {it.state === "done" ? (
+                  <Check size={16} className="text-[#22A55B]" />
+                ) : it.state === "current" ? (
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#F45722]" />
+                ) : (
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-full border-2 border-[#D0D0D0]" />
+                )}
                 <span className="text-[14px] font-medium text-[#1A1A1A]">{it.title}</span>
                 <StatusPill kind={it.pill} label={it.pillLabel} />
               </div>
-              <span className="text-[12px] text-[#6B6B6B]">{it.subtitle}</span>
+              <div className="flex items-center gap-2 text-[12px] text-[#6B6B6B]">
+                {future && it.assignedTo && <span>Assigned to {it.assignedTo}</span>}
+                <span>{it.subtitle}</span>
+              </div>
             </button>
             {open && <div className="border-t border-[#EBEBEB] px-5 py-3">{it.details}</div>}
           </div>
@@ -294,18 +456,27 @@ function CompletedTimeline({ data }: { data: LeadData }) {
   );
 }
 
-function ActionsPanel({ data, userEmail, onChanged }: { data: LeadData; userEmail: string; onChanged: () => void }) {
+function ActionsPanel({
+  data,
+  userEmail,
+  onChanged,
+}: {
+  data: LeadData;
+  userEmail: string;
+  onChanged: () => void;
+}) {
   const stage = data.lead.current_stage;
   const isOwner = data.lead.current_owner_email === userEmail;
 
   if (!isOwner) {
-    const forLabel = stage === "calling_pending"
-      ? "Calling"
-      : stage === "profile_creation_pending"
-      ? "Expert Profile Creation"
-      : stage.startsWith("round_") && stage.endsWith("_pending")
-      ? `Round ${stage.replace(/[^0-9]/g, "")}`
-      : stage;
+    const forLabel =
+      stage === "calling_pending"
+        ? "Calling"
+        : stage === "profile_creation_pending"
+          ? "Expert Profile Creation"
+          : stage.startsWith("round_") && stage.endsWith("_pending")
+            ? `Round ${stage.replace(/[^0-9]/g, "")}`
+            : stage;
     return (
       <div className={`${card} ${cardPad}`}>
         <div className="text-[16px] font-semibold text-[#1A1A1A]">
@@ -314,9 +485,7 @@ function ActionsPanel({ data, userEmail, onChanged }: { data: LeadData; userEmai
         <p className="mt-2 text-[14px] text-[#6B6B6B]">
           For {forLabel} · {fmtDateTime(data.lead.updated_at)}
         </p>
-        <p className="mt-4 text-[14px] text-[#6B6B6B]">
-          Your work on this lead is complete.
-        </p>
+        <p className="mt-4 text-[14px] text-[#6B6B6B]">Your work on this lead is complete.</p>
       </div>
     );
   }
@@ -331,42 +500,42 @@ function ActionsPanel({ data, userEmail, onChanged }: { data: LeadData; userEmai
   if (stage === "profile_creation_pending") {
     return <ProfileActions data={data} onChanged={onChanged} />;
   }
-  return (
-    <div className={`${card} ${cardPad} text-[14px] text-[#6B6B6B]`}>
-      Nothing to do here.
-    </div>
-  );
+  return <div className={`${card} ${cardPad} text-[14px] text-[#6B6B6B]`}>Nothing to do here.</div>;
 }
 
 /* ===================== CALLING ===================== */
 
 const CALLING_OPTIONS: Array<{ value: string; label: string; desc: string }> = [
-  { value: "connected",      label: "Connected",      desc: "I spoke to them." },
-  { value: "reconnect",      label: "Reconnect",      desc: "They asked to call back later." },
-  { value: "rnr",            label: "RNR",            desc: "Phone rang but no one answered." },
-  { value: "junk",           label: "Junk",           desc: "Wrong number or fake lead." },
+  { value: "connected", label: "Connected", desc: "I spoke to them." },
+  { value: "reconnect", label: "Reconnect", desc: "They asked to call back later." },
+  { value: "rnr", label: "RNR", desc: "Phone rang but no one answered." },
+  { value: "junk", label: "Junk", desc: "Wrong number or fake lead." },
   { value: "not_interested", label: "Not Interested", desc: "They picked up but refused." },
 ];
 
 function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => void }) {
-  const { lead, attempts } = data;
+  const { lead, attempts, assignments } = data;
   const logFn = useServerFn(logCallOutcome);
-  const fetchPool = useServerFn(getPool);
-  const poolQ = useQuery({
-    queryKey: ["pool", "round_1"],
-    queryFn: () => fetchPool({ data: { stage: "round_1" } }),
-    staleTime: 10 * 60_000,
-  });
+
+  const round1Assignee = assignments.find((a) => a.stage === "round_1")?.assigned_email ?? null;
 
   const sorted = [...attempts].sort((a, b) => a.attempt_number - b.attempt_number);
-  const last = sorted[sorted.length - 1] as ((typeof sorted)[number] & { outcome?: string | null }) | undefined;
+  const last = sorted[sorted.length - 1] as
+    ((typeof sorted)[number] & { outcome?: string | null }) | undefined;
   const lastOutcome = last ? (last.outcome ?? (last.connected ? "connected" : "rnr")) : null;
-  const terminal = lastOutcome ? ["connected", "junk", "not_interested"].includes(lastOutcome) : false;
-  const nextAttempt = !last ? 1 : terminal ? null : last.attempt_number >= 3 ? null : last.attempt_number + 1;
+  const terminal = lastOutcome
+    ? ["connected", "junk", "not_interested"].includes(lastOutcome)
+    : false;
+  const nextAttempt = !last
+    ? 1
+    : terminal
+      ? null
+      : last.attempt_number >= 3
+        ? null
+        : last.attempt_number + 1;
 
   const [outcome, setOutcome] = useState<string | null>(null);
   const [remarks, setRemarks] = useState("");
-  const [kam, setKam] = useState("");
   const [busy, setBusy] = useState(false);
 
   if (nextAttempt == null) {
@@ -377,13 +546,19 @@ function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => 
     );
   }
 
+  const remarksRequired = outcome === "junk" || outcome === "not_interested";
+
   async function save() {
     if (!outcome) {
       toast.warning("Select an outcome before saving.");
       return;
     }
-    if (outcome === "connected" && !kam) {
-      toast.warning("Select a person to take this forward.");
+    if (remarksRequired && !remarks.trim()) {
+      toast.warning("Remarks are required for this outcome.");
+      return;
+    }
+    if (outcome === "connected" && !round1Assignee) {
+      toast.warning("Round 1 taker not assigned yet — contact your admin.");
       return;
     }
     setBusy(true);
@@ -394,17 +569,15 @@ function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => 
           attempt_number: nextAttempt!,
           outcome: outcome as "connected" | "rnr" | "reconnect" | "junk" | "not_interested",
           remarks: remarks || null,
-          assigned_kam_email: outcome === "connected" ? kam || null : null,
         },
       });
-      if (outcome === "connected" && kam) {
-        toast.success(`Lead passed to ${kam}.`);
+      if (outcome === "connected") {
+        toast.success(`Lead passed to ${round1Assignee} for Round 1.`);
       } else {
         toast.success("Attempt saved.");
       }
       setOutcome(null);
       setRemarks("");
-      setKam("");
       onChanged();
     } catch (e) {
       toast.error("Something went wrong. Try again.", { description: (e as Error).message });
@@ -440,22 +613,26 @@ function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => 
           })}
         </div>
 
-        {outcome === "connected" && (
+        {outcome && outcome !== "connected" && (
           <div className="mt-5 space-y-1.5">
-            <FieldLabel>Notes (optional)</FieldLabel>
+            <FieldLabel>Notes {remarksRequired ? "(required)" : "(optional)"}</FieldLabel>
             <textarea
               value={remarks}
               onChange={(e) => setRemarks(e.target.value)}
               rows={3}
-              placeholder="What did they say?"
+              placeholder={remarksRequired ? "Why? (required)" : "What happened?"}
               className="w-full rounded-[8px] border border-[#EBEBEB] bg-white px-3 py-2 text-[15px] text-[#1A1A1A] placeholder:text-[#ADADAD] transition-all duration-150 focus:border-[#F45722] focus:outline-none focus:ring-[3px] focus:ring-[#F45722]/10"
             />
           </div>
         )}
 
-        {outcome !== "connected" && (
+        {outcome && outcome !== "connected" && (
           <div className="mt-5">
-            <PrimaryButton onClick={save} disabled={busy || !outcome} className="w-full">
+            <PrimaryButton
+              onClick={save}
+              disabled={busy || (remarksRequired && !remarks.trim())}
+              className="w-full"
+            >
               {busy ? "Saving" : "Save attempt"}
             </PrimaryButton>
           </div>
@@ -464,25 +641,34 @@ function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => 
 
       {outcome === "connected" && (
         <div className={`${card} ${cardPad}`}>
-          <div className="text-[16px] font-semibold text-[#1A1A1A]">Pass the lead to</div>
-          <p className="mt-1 text-[14px] text-[#6B6B6B]">
-            Pick a person from your team to conduct Round 1.
-          </p>
-          <div className="mt-4 space-y-3">
-            <Select value={kam} onValueChange={setKam}>
-              <SelectTrigger className="h-10 rounded-[8px] border-[#EBEBEB]">
-                <SelectValue placeholder="Select a person" />
-              </SelectTrigger>
-              <SelectContent>
-                {(poolQ.data?.members ?? []).map((m) => (
-                  <SelectItem key={m} value={m}>{m}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <PrimaryButton onClick={save} disabled={busy || !kam} className="w-full">
-              {busy ? "Passing" : "Pass to Round 1"}
-            </PrimaryButton>
-          </div>
+          <div className="text-[16px] font-semibold text-[#1A1A1A]">Next</div>
+          {round1Assignee ? (
+            <>
+              <p className="mt-1 text-[14px] text-[#6B6B6B]">
+                This lead will be passed to{" "}
+                <span className="font-medium text-[#1A1A1A]">{round1Assignee}</span> for Round 1.
+              </p>
+              <div className="mt-4 space-y-1.5">
+                <FieldLabel>Notes (optional)</FieldLabel>
+                <textarea
+                  value={remarks}
+                  onChange={(e) => setRemarks(e.target.value)}
+                  rows={3}
+                  placeholder="What did they say?"
+                  className="w-full rounded-[8px] border border-[#EBEBEB] bg-white px-3 py-2 text-[15px] text-[#1A1A1A] placeholder:text-[#ADADAD] transition-all duration-150 focus:border-[#F45722] focus:outline-none focus:ring-[3px] focus:ring-[#F45722]/10"
+                />
+              </div>
+              <div className="mt-4">
+                <PrimaryButton onClick={save} disabled={busy} className="w-full">
+                  {busy ? "Passing" : "Pass to Round 1"}
+                </PrimaryButton>
+              </div>
+            </>
+          ) : (
+            <p className="mt-2 text-[14px] text-[#E53935]">
+              Round 1 taker not assigned yet — contact your admin.
+            </p>
+          )}
         </div>
       )}
     </div>
@@ -491,31 +677,36 @@ function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => 
 
 /* ===================== ROUNDS ===================== */
 
-function RoundActions({ data, round, onChanged }: { data: LeadData; round: number; onChanged: () => void }) {
-  const { lead } = data;
+function RoundActions({
+  data,
+  round,
+  onChanged,
+}: {
+  data: LeadData;
+  round: number;
+  onChanged: () => void;
+}) {
+  const { lead, assignments } = data;
   const startFn = useServerFn(startRound);
   const submitFn = useServerFn(submitRound);
-  const fetchPool = useServerFn(getPool);
   const startQ = useQuery({
     queryKey: ["round-questions", lead.id, round],
     queryFn: () => startFn({ data: { lead_id: lead.id, round_number: round } }),
   });
   const numRounds = data.cfg.num_rounds;
   const isLastRound = round >= numRounds;
-  const nextStage: "round_2" | "round_3" | "round_4" | "expert_creation" = isLastRound
-    ? "expert_creation"
-    : (`round_${round + 1}` as "round_2" | "round_3" | "round_4");
-  const poolQ = useQuery({
-    queryKey: ["pool", nextStage],
-    queryFn: () => fetchPool({ data: { stage: nextStage } }),
-    staleTime: 10 * 60_000,
-  });
+  const nextStageKey = isLastRound ? "expert_creation" : `round_${round + 1}`;
+  const nextStageLabel = isLastRound ? "Expert Creation" : `Round ${round + 1}`;
+  const nextAssignee = assignments.find((a) => a.stage === nextStageKey)?.assigned_email ?? null;
 
   const [grades, setGrades] = useState<Record<string, number>>({});
   const [remarks, setRemarks] = useState("");
-  const [nextOwner, setNextOwner] = useState("");
   const [busy, setBusy] = useState(false);
-  const [verdict, setVerdict] = useState<{ verdict: string | null; total: number; passing?: number } | null>(null);
+  const [verdict, setVerdict] = useState<{
+    verdict: string | null;
+    total: number;
+    passing?: number;
+  } | null>(null);
 
   const questions = useMemo(() => startQ.data?.questions ?? [], [startQ.data]);
   const graded = questions.filter((q) => grades[q.question_id] != null).length;
@@ -537,12 +728,11 @@ function RoundActions({ data, round, onChanged }: { data: LeadData; round: numbe
           grade: grades[q.question_id] ?? 0,
         })),
         remarks: remarks || null,
-        next_owner_email: nextOwner || null,
       };
       const r = await submitFn({ data: payload });
       setVerdict({ verdict: r.verdict ?? null, total: r.total_score ?? 0 });
       if (r.verdict === "passed") {
-        toast.success(`Round ${round} passed.`);
+        toast.success(`Round ${round} passed. Moving to ${nextStageLabel}.`);
       } else if (r.verdict === "failed") {
         toast.error(`Round ${round} not passed.`);
       } else {
@@ -561,41 +751,18 @@ function RoundActions({ data, round, onChanged }: { data: LeadData; round: numbe
     const failed = verdict.verdict === "failed";
     if (passed) {
       return (
-        <div className="space-y-4">
-          <div className={`${card} ${cardPad}`}>
-            <StatusPill kind="passed" label="Passed" />
-            <h2 className="mt-3 text-[20px] font-semibold tracking-tight text-[#1A1A1A]">
-              Round {round} passed
-            </h2>
-            <p className="mt-1 text-[14px] text-[#6B6B6B]">
-              Total score: <span className="font-medium text-[#1A1A1A]">{verdict.total}</span>
-            </p>
-            {isLastRound && (
-              <p className="mt-2 text-[14px] text-[#6B6B6B]">
-                Pass this lead to the Expert Creation team.
-              </p>
-            )}
-          </div>
-          {isLastRound && (
-            <div className={`${card} ${cardPad}`}>
-              <FieldLabel>Select Expert Creation Agent</FieldLabel>
-              <div className="mt-2 space-y-3">
-                <Select value={nextOwner} onValueChange={setNextOwner}>
-                  <SelectTrigger className="h-10 rounded-[8px] border-[#EBEBEB]">
-                    <SelectValue placeholder="Choose agent" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(poolQ.data?.members ?? []).map((m) => (
-                      <SelectItem key={m} value={m}>{m}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <PrimaryButton onClick={submit} disabled={!nextOwner || busy} className="w-full">
-                  Pass to Expert Creation
-                </PrimaryButton>
-              </div>
-            </div>
-          )}
+        <div className={`${card} ${cardPad}`}>
+          <StatusPill kind="passed" label="Passed" />
+          <h2 className="mt-3 text-[20px] font-semibold tracking-tight text-[#1A1A1A]">
+            Round {round} passed
+          </h2>
+          <p className="mt-1 text-[14px] text-[#6B6B6B]">
+            Total score: <span className="font-medium text-[#1A1A1A]">{verdict.total}</span>
+          </p>
+          <p className="mt-2 text-[14px] text-[#6B6B6B]">
+            Lead moving to <span className="font-medium text-[#1A1A1A]">{nextAssignee ?? "—"}</span>{" "}
+            for {nextStageLabel}.
+          </p>
         </div>
       );
     }
@@ -672,23 +839,19 @@ function RoundActions({ data, round, onChanged }: { data: LeadData; round: numbe
         />
       </div>
 
-      <div className="mt-6 space-y-1.5">
-        <FieldLabel>
-          {isLastRound
-            ? "If they pass, who creates their expert profile?"
-            : `If they pass, who conducts Round ${round + 1}?`}
-        </FieldLabel>
-        <Select value={nextOwner} onValueChange={setNextOwner}>
-          <SelectTrigger className="h-10 rounded-[8px] border-[#EBEBEB]">
-            <SelectValue placeholder="Select a person" />
-          </SelectTrigger>
-          <SelectContent>
-            {(poolQ.data?.members ?? []).map((m) => (
-              <SelectItem key={m} value={m}>{m}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <p className="text-[12px] text-[#6B6B6B]">Only used if they pass this round.</p>
+      <div className="mt-6 rounded-[8px] bg-[#F9F9F9] px-4 py-3">
+        <div className="text-[12px] font-medium uppercase tracking-wide text-[#6B6B6B]">
+          Next (if they pass)
+        </div>
+        {nextAssignee ? (
+          <p className="mt-1 text-[14px] text-[#1A1A1A]">
+            {nextAssignee} <span className="text-[#6B6B6B]">({nextStageLabel})</span>
+          </p>
+        ) : (
+          <p className="mt-1 text-[14px] text-[#E53935]">
+            {nextStageLabel} taker not assigned yet — contact your admin.
+          </p>
+        )}
       </div>
 
       {questions.length > 0 && (
@@ -698,11 +861,7 @@ function RoundActions({ data, round, onChanged }: { data: LeadData; round: numbe
       )}
 
       <div className="mt-4">
-        <PrimaryButton
-          onClick={submit}
-          disabled={busy || !allGraded}
-          className="w-full"
-        >
+        <PrimaryButton onClick={submit} disabled={busy || !allGraded} className="w-full">
           {busy ? "Submitting" : `Submit Round ${round}`}
         </PrimaryButton>
         {!allGraded && questions.length > 0 && (
@@ -746,7 +905,8 @@ function ProfileActions({ data, onChanged }: { data: LeadData; onChanged: () => 
     <div className={`${card} ${cardPad}`}>
       <div className="text-[16px] font-semibold text-[#1A1A1A]">Link the expert profile</div>
       <p className="mt-1 text-[14px] text-[#6B6B6B]">
-        Create the expert profile in the AstroLokal app, sync the experts sheet, then pick the new expert ID below.
+        Create the expert profile in the AstroLokal app, sync the experts sheet, then pick the new
+        expert ID below.
       </p>
       <div className="mt-4 space-y-3">
         <Select value={expertId} onValueChange={setExpertId}>
@@ -755,7 +915,9 @@ function ProfileActions({ data, onChanged }: { data: LeadData; onChanged: () => 
           </SelectTrigger>
           <SelectContent>
             {(idsQ.data?.expert_ids ?? []).map((e) => (
-              <SelectItem key={e} value={e}>{e}</SelectItem>
+              <SelectItem key={e} value={e}>
+                {e}
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>

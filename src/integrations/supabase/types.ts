@@ -125,6 +125,44 @@ export type Database = {
           },
         ]
       }
+      duplicate_log: {
+        Row: {
+          detected_at: string
+          detected_by: string
+          id: string
+          incoming_contact: string
+          incoming_name: string | null
+          incoming_source: string | null
+          matched_lead_id: string | null
+        }
+        Insert: {
+          detected_at?: string
+          detected_by: string
+          id?: string
+          incoming_contact: string
+          incoming_name?: string | null
+          incoming_source?: string | null
+          matched_lead_id?: string | null
+        }
+        Update: {
+          detected_at?: string
+          detected_by?: string
+          id?: string
+          incoming_contact?: string
+          incoming_name?: string | null
+          incoming_source?: string | null
+          matched_lead_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "duplicate_log_matched_lead_id_fkey"
+            columns: ["matched_lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       expert_profiles: {
         Row: {
           activated_at: string | null
@@ -203,6 +241,41 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "interview_rounds_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      lead_stage_assignments: {
+        Row: {
+          assigned_at: string
+          assigned_by: string
+          assigned_email: string
+          id: string
+          lead_id: string
+          stage: string
+        }
+        Insert: {
+          assigned_at?: string
+          assigned_by: string
+          assigned_email: string
+          id?: string
+          lead_id: string
+          stage: string
+        }
+        Update: {
+          assigned_at?: string
+          assigned_by?: string
+          assigned_email?: string
+          id?: string
+          lead_id?: string
+          stage?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lead_stage_assignments_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
             referencedRelation: "leads"
@@ -344,6 +417,30 @@ export type Database = {
         Update: {
           passing_marks?: number
           round_number?: number
+        }
+        Relationships: []
+      }
+      source_priority_config: {
+        Row: {
+          id: string
+          is_active: boolean
+          priority_score: number
+          source_name: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          is_active?: boolean
+          priority_score?: number
+          source_name: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          is_active?: boolean
+          priority_score?: number
+          source_name?: string
+          updated_at?: string
         }
         Relationships: []
       }

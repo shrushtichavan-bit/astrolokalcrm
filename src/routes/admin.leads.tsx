@@ -7,7 +7,13 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/admin/leads")({
@@ -15,8 +21,17 @@ export const Route = createFileRoute("/admin/leads")({
 });
 
 const STAGES = [
-  "calling_pending", "round_1_pending", "round_2_pending", "round_3_pending", "round_4_pending",
-  "profile_creation_pending", "profile_created", "active", "failed", "junk", "not_interested",
+  "calling_pending",
+  "round_1_pending",
+  "round_2_pending",
+  "round_3_pending",
+  "round_4_pending",
+  "profile_creation_pending",
+  "profile_created",
+  "active",
+  "failed",
+  "junk",
+  "not_interested",
 ];
 const STATUSES = ["connected", "rnr", "reconnect", "junk", "not_interested"];
 const VERDICTS = ["Passed", "Failed", "Pending"];
@@ -37,8 +52,13 @@ function AllLeadsPage() {
 
   const baseFilters = useMemo(
     () => ({
-      from: from || null, to: to || null, person: person || null,
-      stage: stage || null, status: status || null, verdict: verdict || null, sort,
+      from: from || null,
+      to: to || null,
+      person: person || null,
+      stage: stage || null,
+      status: status || null,
+      verdict: verdict || null,
+      sort,
       limit: PAGE_SIZE,
     }),
     [from, to, person, stage, status, verdict, sort],
@@ -52,8 +72,7 @@ function AllLeadsPage() {
   const infiniteQ = useInfiniteQuery({
     queryKey: ["admin-leads", baseFilters],
     initialPageParam: null as string | null,
-    queryFn: ({ pageParam }) =>
-      fn({ data: { ...baseFilters, cursor: pageParam ?? null } }),
+    queryFn: ({ pageParam }) => fn({ data: { ...baseFilters, cursor: pageParam ?? null } }),
     getNextPageParam: (last) => last.next_cursor,
     staleTime: 120_000, // 2 minutes
   });
@@ -72,7 +91,9 @@ function AllLeadsPage() {
   const trimmed = allRows.length - visibleRows.length;
 
   async function downloadCsv() {
-    const t = toast.loading("Preparing your export. This may take up to a minute for large datasets. Do not close this tab.");
+    const t = toast.loading(
+      "Preparing your export. This may take up to a minute for large datasets. Do not close this tab.",
+    );
     try {
       const { csv } = await exportFn({ data: { ...baseFilters, cursor: null, limit: PAGE_SIZE } });
       const blob = new Blob([csv], { type: "text/csv" });
@@ -95,7 +116,8 @@ function AllLeadsPage() {
         className={`px-2 py-2 text-left cursor-pointer select-none ${active ? "text-foreground" : ""}`}
         onClick={() => setSort(k)}
       >
-        {label}{active ? " ↓" : ""}
+        {label}
+        {active ? " ↓" : ""}
       </th>
     );
   }
@@ -104,54 +126,96 @@ function AllLeadsPage() {
     <div className="space-y-4">
       <Card>
         <CardContent className="grid grid-cols-2 gap-3 p-4 md:grid-cols-4 lg:grid-cols-7">
-          <div><Label className="text-xs">From</Label><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></div>
-          <div><Label className="text-xs">To</Label><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></div>
+          <div>
+            <Label className="text-xs">From</Label>
+            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+          </div>
+          <div>
+            <Label className="text-xs">To</Label>
+            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+          </div>
           <div>
             <Label className="text-xs">Person</Label>
-            <Select value={person || "__all"} onValueChange={(v) => setPerson(v === "__all" ? "" : v)}>
-              <SelectTrigger><SelectValue placeholder="All" /></SelectTrigger>
+            <Select
+              value={person || "__all"}
+              onValueChange={(v) => setPerson(v === "__all" ? "" : v)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="All" />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__all">All</SelectItem>
                 {(peopleQ.data?.people ?? []).map((p) => (
-                  <SelectItem key={p.email} value={p.email}>{p.name}</SelectItem>
+                  <SelectItem key={p.email} value={p.email}>
+                    {p.name}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
           <div>
             <Label className="text-xs">Stage</Label>
-            <Select value={stage || "__all"} onValueChange={(v) => setStage(v === "__all" ? "" : v)}>
-              <SelectTrigger><SelectValue placeholder="All" /></SelectTrigger>
+            <Select
+              value={stage || "__all"}
+              onValueChange={(v) => setStage(v === "__all" ? "" : v)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="All" />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__all">All</SelectItem>
-                {STAGES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                {STAGES.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {s}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
           <div>
             <Label className="text-xs">Status</Label>
-            <Select value={status || "__all"} onValueChange={(v) => setStatus(v === "__all" ? "" : v)}>
-              <SelectTrigger><SelectValue placeholder="All" /></SelectTrigger>
+            <Select
+              value={status || "__all"}
+              onValueChange={(v) => setStatus(v === "__all" ? "" : v)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="All" />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__all">All</SelectItem>
-                {STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                {STATUSES.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {s}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
           <div>
             <Label className="text-xs">Verdict</Label>
-            <Select value={verdict || "__all"} onValueChange={(v) => setVerdict(v === "__all" ? "" : v)}>
-              <SelectTrigger><SelectValue placeholder="All" /></SelectTrigger>
+            <Select
+              value={verdict || "__all"}
+              onValueChange={(v) => setVerdict(v === "__all" ? "" : v)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="All" />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__all">All</SelectItem>
-                {VERDICTS.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                {VERDICTS.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {s}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
           <div>
             <Label className="text-xs">Sort by</Label>
             <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="lead_date">Lead date</SelectItem>
                 <SelectItem value="priority">Priority</SelectItem>
@@ -171,7 +235,9 @@ function AllLeadsPage() {
             <span className="ml-2 text-xs">(oldest {trimmed} hidden to keep table fast)</span>
           )}
         </div>
-        <Button size="sm" variant="outline" onClick={downloadCsv}>Export CSV</Button>
+        <Button size="sm" variant="outline" onClick={downloadCsv}>
+          Export CSV
+        </Button>
       </div>
       <Card>
         <CardContent className="p-0 overflow-x-auto">
@@ -189,6 +255,10 @@ function AllLeadsPage() {
                 <th className="px-2 py-2 text-left">Verdict</th>
                 <SortableTh k="stage" label="Current Stage" />
                 <SortableTh k="updated" label="Last Updated" />
+                <th className="px-2 py-2 text-left">Telecaller (Chain)</th>
+                <th className="px-2 py-2 text-left">R1 Taker (Chain)</th>
+                <th className="px-2 py-2 text-left">R2 Taker (Chain)</th>
+                <th className="px-2 py-2 text-left">Expert Creator (Chain)</th>
                 <th className="px-2 py-2"></th>
               </tr>
             </thead>
@@ -208,8 +278,20 @@ function AllLeadsPage() {
                   <td className="px-2 py-2 text-xs text-muted-foreground">
                     {r.updated_at ? new Date(r.updated_at).toLocaleString() : "—"}
                   </td>
+                  <td className="px-2 py-2 text-xs text-muted-foreground">{r.calling_assignee}</td>
+                  <td className="px-2 py-2 text-xs text-muted-foreground">{r.round_1_assignee}</td>
+                  <td className="px-2 py-2 text-xs text-muted-foreground">{r.round_2_assignee}</td>
+                  <td className="px-2 py-2 text-xs text-muted-foreground">
+                    {r.expert_creation_assignee}
+                  </td>
                   <td className="px-2 py-2 text-right">
-                    <Link to="/leads/$id" params={{ id: r.id }} className="text-xs font-medium text-[#F45722] hover:text-[#D94A1E]">Open</Link>
+                    <Link
+                      to="/leads/$id"
+                      params={{ id: r.id }}
+                      className="text-xs font-medium text-[#F45722] hover:text-[#D94A1E]"
+                    >
+                      Open
+                    </Link>
                   </td>
                 </tr>
               ))}

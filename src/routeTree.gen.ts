@@ -15,10 +15,16 @@ import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as LeadsIdRouteImport } from './routes/leads.$id'
+import { Route as AdminTeamRouteImport } from './routes/admin.team'
 import { Route as AdminTatRouteImport } from './routes/admin.tat'
+import { Route as AdminSourcesRouteImport } from './routes/admin.sources'
 import { Route as AdminPeopleRouteImport } from './routes/admin.people'
 import { Route as AdminLeadsRouteImport } from './routes/admin.leads'
+import { Route as AdminDuplicatesRouteImport } from './routes/admin.duplicates'
+import { Route as AdminConfigRouteImport } from './routes/admin.config'
+import { Route as AdminAllotmentRouteImport } from './routes/admin.allotment'
 import { Route as ApiAuthLoginRouteImport } from './routes/api/auth/login'
+import { Route as AdminLeadsAddRouteImport } from './routes/admin.leads.add'
 import { Route as ApiPublicHooksSyncLeadsRouteImport } from './routes/api/public/hooks/sync-leads'
 import { Route as ApiPublicHooksSyncLeadDumpRouteImport } from './routes/api/public/hooks/sync-lead-dump'
 import { Route as ApiPublicHooksSyncExpertsRouteImport } from './routes/api/public/hooks/sync-experts'
@@ -57,9 +63,19 @@ const LeadsIdRoute = LeadsIdRouteImport.update({
   path: '/leads/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminTeamRoute = AdminTeamRouteImport.update({
+  id: '/team',
+  path: '/team',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminTatRoute = AdminTatRouteImport.update({
   id: '/tat',
   path: '/tat',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminSourcesRoute = AdminSourcesRouteImport.update({
+  id: '/sources',
+  path: '/sources',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminPeopleRoute = AdminPeopleRouteImport.update({
@@ -72,10 +88,30 @@ const AdminLeadsRoute = AdminLeadsRouteImport.update({
   path: '/leads',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminDuplicatesRoute = AdminDuplicatesRouteImport.update({
+  id: '/duplicates',
+  path: '/duplicates',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminConfigRoute = AdminConfigRouteImport.update({
+  id: '/config',
+  path: '/config',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminAllotmentRoute = AdminAllotmentRouteImport.update({
+  id: '/allotment',
+  path: '/allotment',
+  getParentRoute: () => AdminRoute,
+} as any)
 const ApiAuthLoginRoute = ApiAuthLoginRouteImport.update({
   id: '/api/auth/login',
   path: '/api/auth/login',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AdminLeadsAddRoute = AdminLeadsAddRouteImport.update({
+  id: '/add',
+  path: '/add',
+  getParentRoute: () => AdminLeadsRoute,
 } as any)
 const ApiPublicHooksSyncLeadsRoute = ApiPublicHooksSyncLeadsRouteImport.update({
   id: '/api/public/hooks/sync-leads',
@@ -124,11 +160,17 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AdminRouteWithChildren
   '/login': typeof LoginRoute
   '/sync': typeof SyncRoute
-  '/admin/leads': typeof AdminLeadsRoute
+  '/admin/allotment': typeof AdminAllotmentRoute
+  '/admin/config': typeof AdminConfigRoute
+  '/admin/duplicates': typeof AdminDuplicatesRoute
+  '/admin/leads': typeof AdminLeadsRouteWithChildren
   '/admin/people': typeof AdminPeopleRoute
+  '/admin/sources': typeof AdminSourcesRoute
   '/admin/tat': typeof AdminTatRoute
+  '/admin/team': typeof AdminTeamRoute
   '/leads/$id': typeof LeadsIdRoute
   '/admin/': typeof AdminIndexRoute
+  '/admin/leads/add': typeof AdminLeadsAddRoute
   '/api/auth/login': typeof ApiAuthLoginRoute
   '/api/public/hooks/bootstrap-credentials': typeof ApiPublicHooksBootstrapCredentialsRoute
   '/api/public/hooks/rebuild-lead-dump': typeof ApiPublicHooksRebuildLeadDumpRoute
@@ -142,11 +184,17 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/sync': typeof SyncRoute
-  '/admin/leads': typeof AdminLeadsRoute
+  '/admin/allotment': typeof AdminAllotmentRoute
+  '/admin/config': typeof AdminConfigRoute
+  '/admin/duplicates': typeof AdminDuplicatesRoute
+  '/admin/leads': typeof AdminLeadsRouteWithChildren
   '/admin/people': typeof AdminPeopleRoute
+  '/admin/sources': typeof AdminSourcesRoute
   '/admin/tat': typeof AdminTatRoute
+  '/admin/team': typeof AdminTeamRoute
   '/leads/$id': typeof LeadsIdRoute
   '/admin': typeof AdminIndexRoute
+  '/admin/leads/add': typeof AdminLeadsAddRoute
   '/api/auth/login': typeof ApiAuthLoginRoute
   '/api/public/hooks/bootstrap-credentials': typeof ApiPublicHooksBootstrapCredentialsRoute
   '/api/public/hooks/rebuild-lead-dump': typeof ApiPublicHooksRebuildLeadDumpRoute
@@ -162,11 +210,17 @@ export interface FileRoutesById {
   '/admin': typeof AdminRouteWithChildren
   '/login': typeof LoginRoute
   '/sync': typeof SyncRoute
-  '/admin/leads': typeof AdminLeadsRoute
+  '/admin/allotment': typeof AdminAllotmentRoute
+  '/admin/config': typeof AdminConfigRoute
+  '/admin/duplicates': typeof AdminDuplicatesRoute
+  '/admin/leads': typeof AdminLeadsRouteWithChildren
   '/admin/people': typeof AdminPeopleRoute
+  '/admin/sources': typeof AdminSourcesRoute
   '/admin/tat': typeof AdminTatRoute
+  '/admin/team': typeof AdminTeamRoute
   '/leads/$id': typeof LeadsIdRoute
   '/admin/': typeof AdminIndexRoute
+  '/admin/leads/add': typeof AdminLeadsAddRoute
   '/api/auth/login': typeof ApiAuthLoginRoute
   '/api/public/hooks/bootstrap-credentials': typeof ApiPublicHooksBootstrapCredentialsRoute
   '/api/public/hooks/rebuild-lead-dump': typeof ApiPublicHooksRebuildLeadDumpRoute
@@ -183,11 +237,17 @@ export interface FileRouteTypes {
     | '/admin'
     | '/login'
     | '/sync'
+    | '/admin/allotment'
+    | '/admin/config'
+    | '/admin/duplicates'
     | '/admin/leads'
     | '/admin/people'
+    | '/admin/sources'
     | '/admin/tat'
+    | '/admin/team'
     | '/leads/$id'
     | '/admin/'
+    | '/admin/leads/add'
     | '/api/auth/login'
     | '/api/public/hooks/bootstrap-credentials'
     | '/api/public/hooks/rebuild-lead-dump'
@@ -201,11 +261,17 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/sync'
+    | '/admin/allotment'
+    | '/admin/config'
+    | '/admin/duplicates'
     | '/admin/leads'
     | '/admin/people'
+    | '/admin/sources'
     | '/admin/tat'
+    | '/admin/team'
     | '/leads/$id'
     | '/admin'
+    | '/admin/leads/add'
     | '/api/auth/login'
     | '/api/public/hooks/bootstrap-credentials'
     | '/api/public/hooks/rebuild-lead-dump'
@@ -220,11 +286,17 @@ export interface FileRouteTypes {
     | '/admin'
     | '/login'
     | '/sync'
+    | '/admin/allotment'
+    | '/admin/config'
+    | '/admin/duplicates'
     | '/admin/leads'
     | '/admin/people'
+    | '/admin/sources'
     | '/admin/tat'
+    | '/admin/team'
     | '/leads/$id'
     | '/admin/'
+    | '/admin/leads/add'
     | '/api/auth/login'
     | '/api/public/hooks/bootstrap-credentials'
     | '/api/public/hooks/rebuild-lead-dump'
@@ -295,11 +367,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LeadsIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/team': {
+      id: '/admin/team'
+      path: '/team'
+      fullPath: '/admin/team'
+      preLoaderRoute: typeof AdminTeamRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/tat': {
       id: '/admin/tat'
       path: '/tat'
       fullPath: '/admin/tat'
       preLoaderRoute: typeof AdminTatRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/sources': {
+      id: '/admin/sources'
+      path: '/sources'
+      fullPath: '/admin/sources'
+      preLoaderRoute: typeof AdminSourcesRouteImport
       parentRoute: typeof AdminRoute
     }
     '/admin/people': {
@@ -316,12 +402,40 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminLeadsRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/duplicates': {
+      id: '/admin/duplicates'
+      path: '/duplicates'
+      fullPath: '/admin/duplicates'
+      preLoaderRoute: typeof AdminDuplicatesRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/config': {
+      id: '/admin/config'
+      path: '/config'
+      fullPath: '/admin/config'
+      preLoaderRoute: typeof AdminConfigRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/allotment': {
+      id: '/admin/allotment'
+      path: '/allotment'
+      fullPath: '/admin/allotment'
+      preLoaderRoute: typeof AdminAllotmentRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/api/auth/login': {
       id: '/api/auth/login'
       path: '/api/auth/login'
       fullPath: '/api/auth/login'
       preLoaderRoute: typeof ApiAuthLoginRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/admin/leads/add': {
+      id: '/admin/leads/add'
+      path: '/add'
+      fullPath: '/admin/leads/add'
+      preLoaderRoute: typeof AdminLeadsAddRouteImport
+      parentRoute: typeof AdminLeadsRoute
     }
     '/api/public/hooks/sync-leads': {
       id: '/api/public/hooks/sync-leads'
@@ -375,17 +489,39 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface AdminLeadsRouteChildren {
+  AdminLeadsAddRoute: typeof AdminLeadsAddRoute
+}
+
+const AdminLeadsRouteChildren: AdminLeadsRouteChildren = {
+  AdminLeadsAddRoute: AdminLeadsAddRoute,
+}
+
+const AdminLeadsRouteWithChildren = AdminLeadsRoute._addFileChildren(
+  AdminLeadsRouteChildren,
+)
+
 interface AdminRouteChildren {
-  AdminLeadsRoute: typeof AdminLeadsRoute
+  AdminAllotmentRoute: typeof AdminAllotmentRoute
+  AdminConfigRoute: typeof AdminConfigRoute
+  AdminDuplicatesRoute: typeof AdminDuplicatesRoute
+  AdminLeadsRoute: typeof AdminLeadsRouteWithChildren
   AdminPeopleRoute: typeof AdminPeopleRoute
+  AdminSourcesRoute: typeof AdminSourcesRoute
   AdminTatRoute: typeof AdminTatRoute
+  AdminTeamRoute: typeof AdminTeamRoute
   AdminIndexRoute: typeof AdminIndexRoute
 }
 
 const AdminRouteChildren: AdminRouteChildren = {
-  AdminLeadsRoute: AdminLeadsRoute,
+  AdminAllotmentRoute: AdminAllotmentRoute,
+  AdminConfigRoute: AdminConfigRoute,
+  AdminDuplicatesRoute: AdminDuplicatesRoute,
+  AdminLeadsRoute: AdminLeadsRouteWithChildren,
   AdminPeopleRoute: AdminPeopleRoute,
+  AdminSourcesRoute: AdminSourcesRoute,
   AdminTatRoute: AdminTatRoute,
+  AdminTeamRoute: AdminTeamRoute,
   AdminIndexRoute: AdminIndexRoute,
 }
 
@@ -410,3 +546,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}

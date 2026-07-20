@@ -2,9 +2,10 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { requireUser } from "./auth.server";
+import { requireRole, requireUser } from "./auth.server";
 import { appendAudit, transitionLead } from "./lead-helpers.server";
 import { upsertLeadDumpInBackground } from "./lead-dump.server";
+import { findDuplicateLead, logDuplicate, normalizeContact } from "./dedup.server";
 
 // ---------- Helpers ----------
 
@@ -34,6 +35,17 @@ async function poolMembers(stage: string): Promise<string[]> {
   return (data ?? []).map((r) => r.eligible_email);
 }
 
+/** Who's pre-assigned to a lead for a given stage, per the admin-set chain. */
+async function assignedFor(leadId: string, stage: string): Promise<string | null> {
+  const { data } = await supabaseAdmin
+    .from("lead_stage_assignments")
+    .select("assigned_email")
+    .eq("lead_id", leadId)
+    .eq("stage", stage)
+    .maybeSingle();
+  return data?.assigned_email ?? null;
+}
+
 async function loadConfig() {
   const { data: cfg } = await supabaseAdmin
     .from("round_config")
@@ -59,7 +71,9 @@ export const listMyLeads = createServerFn({ method: "GET" }).handler(async () =>
   // 1. Leads currently owned by me
   const { data: ownedRaw, error } = await supabaseAdmin
     .from("leads")
-    .select("id, lead_id, name, contact, source, priority, current_stage, current_owner_email, assigned_to_email, updated_at, lead_date")
+    .select(
+      "id, lead_id, name, contact, source, priority, current_stage, current_owner_email, assigned_to_email, updated_at, lead_date",
+    )
     .eq("current_owner_email", me)
     .order("priority", { ascending: true })
     .order("updated_at", { ascending: false })
@@ -115,11 +129,7 @@ export const listMyLeads = createServerFn({ method: "GET" }).handler(async () =>
   const numRounds = cfgRow?.num_rounds ?? 2;
 
   // 5. Done items — leads I've touched that aren't in my pending list
-  const [
-    { data: myAttempts },
-    { data: myRounds },
-    { data: myProfiles },
-  ] = await Promise.all([
+  const [{ data: myAttempts }, { data: myRounds }, { data: myProfiles }] = await Promise.all([
     supabaseAdmin
       .from("call_attempts")
       .select("lead_id, attempt_number, outcome, connected, attempted_at")
@@ -171,14 +181,22 @@ export const listMyLeads = createServerFn({ method: "GET" }).handler(async () =>
     ]);
     const statusByLead = new Map((statuses ?? []).map((s) => [s.lead_id, s]));
     // Last round I conducted per lead
-    const myLastRound = new Map<string, (typeof myRounds extends infer T ? (T extends Array<infer U> ? U : never) : never)>();
+    const myLastRound = new Map<
+      string,
+      typeof myRounds extends infer T ? (T extends Array<infer U> ? U : never) : never
+    >();
     for (const r of (myRounds ?? []).slice().sort((a, b) => a.round_number - b.round_number)) {
       myLastRound.set(r.lead_id, r);
     }
     const profileByLead = new Map((myProfiles ?? []).map((p) => [p.lead_id, p]));
     // Last attempt of mine per lead
-    const myLastAttempt = new Map<string, (typeof myAttempts extends infer T ? (T extends Array<infer U> ? U : never) : never)>();
-    for (const a of (myAttempts ?? []).slice().sort((a, b) => a.attempt_number - b.attempt_number)) {
+    const myLastAttempt = new Map<
+      string,
+      typeof myAttempts extends infer T ? (T extends Array<infer U> ? U : never) : never
+    >();
+    for (const a of (myAttempts ?? [])
+      .slice()
+      .sort((a, b) => a.attempt_number - b.attempt_number)) {
       myLastAttempt.set(a.lead_id, a);
     }
 
@@ -215,7 +233,8 @@ export const listMyLeads = createServerFn({ method: "GET" }).handler(async () =>
       } else if (att) {
         const out = att.outcome ?? (att.connected ? "connected" : "rnr");
         if (out === "rnr") label = `RNR after Attempt ${att.attempt_number} (terminal)`;
-        else if (out === "reconnect") label = `Reconnect after Attempt ${att.attempt_number} (terminal)`;
+        else if (out === "reconnect")
+          label = `Reconnect after Attempt ${att.attempt_number} (terminal)`;
         else label = `${out} after Attempt ${att.attempt_number}`;
         at = att.attempted_at;
       } else {
@@ -246,27 +265,37 @@ export const getLead = createServerFn({ method: "GET" })
       .maybeSingle();
     if (leadErr) throw leadErr;
     if (!lead) throw new Error("Lead not found");
-    const [{ data: attempts }, { data: status }, { data: rounds }, { data: profile }, { data: audit }] =
-      await Promise.all([
-        supabaseAdmin
-          .from("call_attempts")
-          .select("*")
-          .eq("lead_id", lead.id)
-          .order("attempt_number"),
-        supabaseAdmin.from("calling_status").select("*").eq("lead_id", lead.id).maybeSingle(),
-        supabaseAdmin
-          .from("interview_rounds")
-          .select("*, question_grades(*)")
-          .eq("lead_id", lead.id)
-          .order("round_number"),
-        supabaseAdmin.from("expert_profiles").select("*").eq("lead_id", lead.id).maybeSingle(),
-        supabaseAdmin
-          .from("audit_log")
-          .select("*")
-          .eq("lead_id", lead.id)
-          .order("performed_at", { ascending: false })
-          .limit(50),
-      ]);
+    const [
+      { data: attempts },
+      { data: status },
+      { data: rounds },
+      { data: profile },
+      { data: audit },
+      { data: assignments },
+    ] = await Promise.all([
+      supabaseAdmin
+        .from("call_attempts")
+        .select("*")
+        .eq("lead_id", lead.id)
+        .order("attempt_number"),
+      supabaseAdmin.from("calling_status").select("*").eq("lead_id", lead.id).maybeSingle(),
+      supabaseAdmin
+        .from("interview_rounds")
+        .select("*, question_grades(*)")
+        .eq("lead_id", lead.id)
+        .order("round_number"),
+      supabaseAdmin.from("expert_profiles").select("*").eq("lead_id", lead.id).maybeSingle(),
+      supabaseAdmin
+        .from("audit_log")
+        .select("*")
+        .eq("lead_id", lead.id)
+        .order("performed_at", { ascending: false })
+        .limit(50),
+      supabaseAdmin
+        .from("lead_stage_assignments")
+        .select("stage, assigned_email")
+        .eq("lead_id", lead.id),
+    ]);
     const { data: cfgRow } = await supabaseAdmin
       .from("round_config")
       .select("num_rounds")
@@ -279,6 +308,7 @@ export const getLead = createServerFn({ method: "GET" })
       rounds: rounds ?? [],
       profile,
       audit: audit ?? [],
+      assignments: assignments ?? [],
       cfg: { num_rounds: cfgRow?.num_rounds ?? 2 },
     };
   });
@@ -288,7 +318,7 @@ export const getPool = createServerFn({ method: "GET" })
   .inputValidator((i: { stage: string }) =>
     z
       .object({
-        stage: z.enum(["round_1", "round_2", "round_3", "round_4", "expert_creation"]),
+        stage: z.enum(["calling", "round_1", "round_2", "round_3", "round_4", "expert_creation"]),
       })
       .parse(i),
   )
@@ -311,6 +341,103 @@ export const listActiveExpertIds = createServerFn({ method: "GET" }).handler(asy
   return { expert_ids: ids };
 });
 
+// ---------- Lead intake (admin/kam) ----------
+
+/** Live dedup check for the Add Lead form — no side effects. */
+export const checkDuplicate = createServerFn({ method: "POST" })
+  .inputValidator((i: { contact: string }) =>
+    z.object({ contact: z.string().min(1).max(30) }).parse(i),
+  )
+  .handler(async ({ data }) => {
+    await requireRole(["admin", "kam"]);
+    const match = await findDuplicateLead(data.contact);
+    return { duplicate: !!match, lead: match };
+  });
+
+/** Manual "Add Lead" intake — dedup check, source-based auto-priority, insert. */
+export const addLead = createServerFn({ method: "POST" })
+  .inputValidator(
+    (i: {
+      name: string;
+      contact: string;
+      source: string;
+      priority?: number | null;
+      lead_date?: string | null;
+      assigned_telecaller_email: string;
+    }) =>
+      z
+        .object({
+          name: z.string().min(1).max(200),
+          contact: z.string().min(1).max(30),
+          source: z.string().min(1).max(200),
+          priority: z.number().int().min(1).max(99).nullish(),
+          lead_date: z.string().nullish(),
+          assigned_telecaller_email: z.string().email().max(255),
+        })
+        .parse(i),
+  )
+  .handler(async ({ data }) => {
+    const u = await requireRole(["admin", "kam"]);
+
+    const normalized = normalizeContact(data.contact);
+    if (!normalized) throw new Error("Contact number must be a valid 10-digit mobile number");
+
+    const dup = await findDuplicateLead(data.contact);
+    if (dup) {
+      await logDuplicate({
+        incoming_name: data.name,
+        incoming_contact: normalized,
+        incoming_source: data.source,
+        matched_lead_id: dup.id,
+        detected_by: u.email,
+      });
+      return { ok: false as const, duplicate: true as const, matched_lead: dup };
+    }
+
+    const telecaller = data.assigned_telecaller_email.toLowerCase();
+    const callingPool = await poolMembers("calling");
+    if (!callingPool.includes(telecaller))
+      throw new Error("Selected telecaller is not in the calling pool");
+
+    let priority = data.priority ?? null;
+    if (priority == null) {
+      const { data: srcCfg } = await supabaseAdmin
+        .from("source_priority_config")
+        .select("priority_score, is_active")
+        .ilike("source_name", data.source)
+        .maybeSingle();
+      priority = srcCfg?.is_active ? srcCfg.priority_score : 99;
+    }
+
+    const lead_id = `REF-${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+
+    const { data: inserted, error } = await supabaseAdmin
+      .from("leads")
+      .insert({
+        lead_id,
+        name: data.name.trim(),
+        contact: normalized,
+        source: data.source.trim(),
+        priority,
+        assigned_to_email: telecaller,
+        current_stage: "calling_pending",
+        current_owner_email: telecaller,
+        lead_date: data.lead_date ?? new Date().toISOString().slice(0, 10),
+      })
+      .select("id, lead_id")
+      .single();
+    if (error) throw new Error(error.message);
+
+    await appendAudit(inserted.id, "lead_created", u.email, {
+      source: data.source,
+      priority,
+      manual: true,
+    });
+    upsertLeadDumpInBackground(inserted.id);
+
+    return { ok: true as const, duplicate: false as const, lead: inserted };
+  });
+
 // ---------- Telecaller actions ----------
 
 /**
@@ -323,28 +450,23 @@ export const listActiveExpertIds = createServerFn({ method: "GET" }).handler(asy
  */
 export const logCallOutcome = createServerFn({ method: "POST" })
   .inputValidator(
-    (i: {
-      lead_id: string;
-      attempt_number: number;
-      outcome: string;
-      remarks?: string | null;
-      assigned_kam_email?: string | null;
-    }) =>
+    (i: { lead_id: string; attempt_number: number; outcome: string; remarks?: string | null }) =>
       z
         .object({
           lead_id: z.string().uuid(),
           attempt_number: z.number().int().min(1).max(3),
           outcome: z.enum(["connected", "rnr", "reconnect", "junk", "not_interested"]),
           remarks: z.string().max(2000).nullish(),
-          assigned_kam_email: z.string().email().max(255).nullish(),
         })
         .parse(i),
   )
   .handler(async ({ data }) => {
     const u = await requireUser();
     const lead = await loadLeadOwned(data.lead_id, u.email);
-    if (lead.current_stage !== "calling_pending")
-      throw new Error("Lead is not in calling stage");
+    if (lead.current_stage !== "calling_pending") throw new Error("Lead is not in calling stage");
+
+    if ((data.outcome === "junk" || data.outcome === "not_interested") && !data.remarks?.trim())
+      throw new Error("Remarks are required for Junk or Not Interested outcomes");
 
     // Load existing attempts in order
     const { data: existing } = await supabaseAdmin
@@ -357,28 +479,22 @@ export const logCallOutcome = createServerFn({ method: "POST" })
     // Lead must not already be locked by a terminal outcome
     const last = rows[rows.length - 1];
     if (last) {
-      const lastOutcome = (last as { outcome?: string | null }).outcome
-        ?? (last.connected ? "connected" : "rnr");
+      const lastOutcome =
+        (last as { outcome?: string | null }).outcome ?? (last.connected ? "connected" : "rnr");
       if (["connected", "junk", "not_interested"].includes(lastOutcome))
         throw new Error("Lead is already finalised — no more attempts allowed");
-      if (last.attempt_number >= 3)
-        throw new Error("All 3 attempts already logged");
+      if (last.attempt_number >= 3) throw new Error("All 3 attempts already logged");
     }
 
     // Sequence: attempt N must equal rows.length + 1
     if (data.attempt_number !== rows.length + 1)
       throw new Error(`Expected attempt #${rows.length + 1}, got #${data.attempt_number}`);
 
-    // KAM validation up-front for connected
+    // Auto-route to the admin-assigned Round 1 taker — no manual dropdown.
     let assignedKam: string | null = null;
     if (data.outcome === "connected") {
-      if (!data.assigned_kam_email)
-        throw new Error("KAM assignment is required when Connected");
-      const pool = await poolMembers("round_1");
-      const target = data.assigned_kam_email.toLowerCase();
-      if (!pool.includes(target))
-        throw new Error("Selected KAM is not in the round_1 pool");
-      assignedKam = target;
+      assignedKam = await assignedFor(lead.id, "round_1");
+      if (!assignedKam) throw new Error("Round 1 taker not assigned yet — contact your admin");
     }
 
     // Insert attempt
@@ -463,7 +579,11 @@ export const logCallAttempt = createServerFn({ method: "POST" })
       { onConflict: "lead_id,attempt_number" },
     );
     if (error) throw new Error(error.message);
-    await appendAudit(lead.id, `attempt_${data.attempt_number}:${data.connected ? "yes" : "no"}`, u.email);
+    await appendAudit(
+      lead.id,
+      `attempt_${data.attempt_number}:${data.connected ? "yes" : "no"}`,
+      u.email,
+    );
 
     // Auto-mark RNR if attempt 3 logged as not connected
     let autoStatus: "rnr" | null = null;
@@ -525,8 +645,7 @@ export const setCallingStatus = createServerFn({ method: "POST" })
       if (!data.assigned_kam_email) throw new Error("KAM assignment is required when connected");
       const pool = await poolMembers("round_1");
       const target = data.assigned_kam_email.toLowerCase();
-      if (!pool.includes(target))
-        throw new Error("Selected KAM is not in the round_1 pool");
+      if (!pool.includes(target)) throw new Error("Selected KAM is not in the round_1 pool");
       assignedKam = target;
     }
 
@@ -591,7 +710,6 @@ export const submitRound = createServerFn({ method: "POST" })
       round_number: number;
       grades: Array<{ question_id: string; question_text_used: string; grade: number }>;
       remarks?: string | null;
-      next_owner_email?: string | null;
     }) =>
       z
         .object({
@@ -608,7 +726,6 @@ export const submitRound = createServerFn({ method: "POST" })
             .min(1)
             .max(200),
           remarks: z.string().max(2000).nullish(),
-          next_owner_email: z.string().email().max(255).nullish(),
         })
         .parse(i),
   )
@@ -616,8 +733,7 @@ export const submitRound = createServerFn({ method: "POST" })
     const u = await requireUser();
     const lead = await loadLeadOwned(data.lead_id, u.email);
     const expectedStage = `round_${data.round_number}_pending`;
-    if (lead.current_stage !== expectedStage)
-      throw new Error(`Lead is not in ${expectedStage}`);
+    if (lead.current_stage !== expectedStage) throw new Error(`Lead is not in ${expectedStage}`);
 
     const { cfg, marksMap } = await loadConfig();
 
@@ -628,7 +744,8 @@ export const submitRound = createServerFn({ method: "POST" })
       .eq("round_number", data.round_number);
     const requiredIds = new Set((qs ?? []).map((q) => q.question_id));
     const givenIds = new Set(data.grades.map((g) => g.question_id));
-    if (requiredIds.size === 0) throw new Error(`No questions configured for round ${data.round_number}`);
+    if (requiredIds.size === 0)
+      throw new Error(`No questions configured for round ${data.round_number}`);
     for (const id of requiredIds)
       if (!givenIds.has(id)) throw new Error(`Missing grade for question ${id}`);
 
@@ -691,16 +808,16 @@ export const submitRound = createServerFn({ method: "POST" })
       return { ok: true, total_score: total, verdict: "failed" as const };
     }
 
-    // Stage transition for passed non-final round
+    // Stage transition for passed non-final round — auto-routed from the
+    // admin-set assignment chain, no manual next-person dropdown.
     if (!isLastRound) {
       const nextStageKey = `round_${data.round_number + 1}` as
-        | "round_1" | "round_2" | "round_3" | "round_4";
-      if (!data.next_owner_email)
-        throw new Error("next_owner_email is required when more rounds remain");
-      const pool = await poolMembers(nextStageKey);
-      const target = data.next_owner_email.toLowerCase();
-      if (!pool.includes(target))
-        throw new Error(`Selected owner is not in the ${nextStageKey} pool`);
+        "round_1" | "round_2" | "round_3" | "round_4";
+      const target = await assignedFor(lead.id, nextStageKey);
+      if (!target)
+        throw new Error(
+          `Round ${data.round_number + 1} taker not assigned yet — contact your admin`,
+        );
       nextStage = `${nextStageKey}_pending`;
       nextOwner = target;
       await supabaseAdmin
@@ -745,12 +862,8 @@ export const submitRound = createServerFn({ method: "POST" })
       .eq("round_number", data.round_number);
 
     if (passed) {
-      if (!data.next_owner_email)
-        throw new Error("next_owner_email is required to assign Expert Creation Agent");
-      const pool = await poolMembers("expert_creation");
-      const target = data.next_owner_email.toLowerCase();
-      if (!pool.includes(target))
-        throw new Error("Selected owner is not in the expert_creation pool");
+      const target = await assignedFor(lead.id, "expert_creation");
+      if (!target) throw new Error("Expert Creation agent not assigned yet — contact your admin");
       await transitionLead(lead.id, "profile_creation_pending", target, u.email, {
         verdict: "passed",
         total_score: total,
@@ -830,9 +943,7 @@ export const getFunnel = createServerFn({ method: "GET" }).handler(async () => {
     .select("*", { count: "exact", head: true });
   counts.uploaded = uploaded ?? 0;
 
-  const { data: attemptedLeads } = await supabaseAdmin
-    .from("call_attempts")
-    .select("lead_id");
+  const { data: attemptedLeads } = await supabaseAdmin.from("call_attempts").select("lead_id");
   counts.attempted = new Set((attemptedLeads ?? []).map((r) => r.lead_id)).size;
 
   const { count: connected } = await supabaseAdmin

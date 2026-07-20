@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { readTab, SHEETS_TABS } from "./sheets.server";
 import { hashPassword, requireRole } from "./auth.server";
 import { rebuildLeadDump, upsertLeadDumpInBackground } from "./lead-dump.server";
+import { findDuplicateLead, logDuplicate, normalizeContact } from "./dedup.server";
 
 const VALID_ROLES = new Set(["lma", "kam", "sme", "admin"]);
 const VALID_STAGES = new Set(["round_1", "round_2", "round_3", "round_4", "expert_creation"]);
@@ -77,7 +78,15 @@ export const syncCredentials = createServerFn({ method: "POST" }).handler(async 
 export const syncLeads = createServerFn({ method: "POST" }).handler(async () => {
   const rows = await readTab(SHEETS_TABS.leads);
   if (rows.length === 0) {
-    return { new: 0, updated: 0, unchanged: 0, total: 0, errors: [], summary: "Sheet was empty." };
+    return {
+      new: 0,
+      updated: 0,
+      unchanged: 0,
+      duplicates: 0,
+      total: 0,
+      errors: [],
+      summary: "Sheet was empty.",
+    };
   }
 
   const ids = rows.map((r) => r.lead_id?.trim()).filter(Boolean) as string[];
@@ -87,6 +96,15 @@ export const syncLeads = createServerFn({ method: "POST" }).handler(async () => 
     .in("lead_id", ids);
   const existingMap = new Map<string, NonNullable<typeof existingRows>[number]>();
   for (const e of existingRows ?? []) existingMap.set(e.lead_id, e);
+
+  // Source → priority overrides, used when the sheet leaves priority blank/99.
+  const { data: sourceCfg } = await supabaseAdmin
+    .from("source_priority_config")
+    .select("source_name, priority_score")
+    .eq("is_active", true);
+  const priorityBySource = new Map(
+    (sourceCfg ?? []).map((s) => [s.source_name.toLowerCase(), s.priority_score]),
+  );
 
   type LeadInsert = {
     lead_id: string;
@@ -103,6 +121,10 @@ export const syncLeads = createServerFn({ method: "POST" }).handler(async () => 
   const errors: string[] = [];
   let updated = 0;
   let unchanged = 0;
+  let duplicates = 0;
+  // Normalized contacts already staged for insert this run — catches
+  // duplicate rows within the same sheet, not just against existing leads.
+  const stagedContacts = new Set<string>();
 
   for (const r of rows) {
     const lead_id = r.lead_id?.trim();
@@ -115,12 +137,19 @@ export const syncLeads = createServerFn({ method: "POST" }).handler(async () => 
       errors.push(`${lead_id}: missing assigned_to_email`);
       continue;
     }
+    const source = r.source?.trim() || null;
+    const priorityProvided = r.priority != null && String(r.priority).trim() !== "";
     const priorityRaw = parseInt(r.priority || "99", 10);
+    let priority = Number.isFinite(priorityRaw) ? priorityRaw : 99;
+    if ((!priorityProvided || priority === 99) && source) {
+      const override = priorityBySource.get(source.toLowerCase());
+      if (override != null) priority = override;
+    }
     const fields = {
       name: r.name?.trim() || lead_id,
       contact: r.contact?.trim() || "",
-      source: r.source?.trim() || null,
-      priority: Number.isFinite(priorityRaw) ? priorityRaw : 99,
+      source,
+      priority,
       assigned_to_email: assigned,
       lead_date: parseLeadDate(r.lead_date),
     };
@@ -145,6 +174,33 @@ export const syncLeads = createServerFn({ method: "POST" }).handler(async () => 
       continue;
     }
 
+    // New lead: dedup by contact number before staging for insert.
+    const normalized = normalizeContact(fields.contact);
+    if (normalized && stagedContacts.has(normalized)) {
+      duplicates++;
+      await logDuplicate({
+        incoming_name: fields.name,
+        incoming_contact: normalized,
+        incoming_source: fields.source,
+        matched_lead_id: null, // duplicate of another row in this same sheet, not an existing DB lead
+        detected_by: "system:sync",
+      });
+      continue;
+    }
+    const dupLead = await findDuplicateLead(fields.contact);
+    if (dupLead) {
+      duplicates++;
+      await logDuplicate({
+        incoming_name: fields.name,
+        incoming_contact: normalized || fields.contact,
+        incoming_source: fields.source,
+        matched_lead_id: dupLead.id,
+        detected_by: "system:sync",
+      });
+      continue;
+    }
+    if (normalized) stagedContacts.add(normalized);
+
     toInsert.push({
       lead_id,
       ...fields,
@@ -161,9 +217,9 @@ export const syncLeads = createServerFn({ method: "POST" }).handler(async () => 
   }
 
   const summary =
-    `${inserted} new, ${updated} updated, ${unchanged} unchanged ` +
+    `${inserted} new, ${updated} updated, ${unchanged} unchanged, ${duplicates} duplicate${duplicates === 1 ? "" : "s"} blocked ` +
     `(out of ${rows.length} sheet row${rows.length === 1 ? "" : "s"}).`;
-  return { new: inserted, updated, unchanged, total: rows.length, errors, summary };
+  return { new: inserted, updated, unchanged, duplicates, total: rows.length, errors, summary };
 });
 
 /** Parse DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD, YYYY/MM/DD, or YYYY-DD-MM into ISO date. */
@@ -207,8 +263,7 @@ export const syncConfig = createServerFn({ method: "POST" }).handler(async () =>
   const c = cfg[0];
   const num_rounds = parseInt(c.num_rounds, 10);
   const rounds_required_for_verdict = parseInt(c.rounds_required_for_verdict, 10);
-  if (!(num_rounds >= 1 && num_rounds <= 4))
-    throw new Error(`invalid num_rounds: ${c.num_rounds}`);
+  if (!(num_rounds >= 1 && num_rounds <= 4)) throw new Error(`invalid num_rounds: ${c.num_rounds}`);
   if (!(rounds_required_for_verdict >= 1 && rounds_required_for_verdict <= num_rounds))
     throw new Error(`rounds_required_for_verdict must be ≤ num_rounds`);
 
@@ -255,9 +310,12 @@ export const syncConfig = createServerFn({ method: "POST" }).handler(async () =>
     });
 
   // ---- 2. All sheets validated. Now wipe + re-insert. ----
-  await supabaseAdmin
-    .from("round_config")
-    .upsert({ id: 1, num_rounds, rounds_required_for_verdict, updated_at: new Date().toISOString() });
+  await supabaseAdmin.from("round_config").upsert({
+    id: 1,
+    num_rounds,
+    rounds_required_for_verdict,
+    updated_at: new Date().toISOString(),
+  });
 
   await supabaseAdmin.from("round_passing_marks").delete().gte("round_number", 1);
   if (marks.length > 0) await supabaseAdmin.from("round_passing_marks").insert(marks);
@@ -373,7 +431,9 @@ export const syncActiveExperts = createServerFn({ method: "POST" }).handler(asyn
 
   const summary =
     `${activeTotal} active, ${inactiveTotal} inactive, ${changed} record${changed === 1 ? "" : "s"} changed` +
-    (unlinked.length ? ` (${unlinked.length} expert ID${unlinked.length === 1 ? "" : "s"} in sheet not yet linked to a lead)` : "") +
+    (unlinked.length
+      ? ` (${unlinked.length} expert ID${unlinked.length === 1 ? "" : "s"} in sheet not yet linked to a lead)`
+      : "") +
     ".";
 
   return {

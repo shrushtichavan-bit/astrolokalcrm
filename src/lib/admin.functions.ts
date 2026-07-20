@@ -79,7 +79,9 @@ export const getAdminFunnel = createServerFn({ method: "POST" })
     if (filterArr) {
       uploaded = filterArr.length;
     } else {
-      const { count } = await supabaseAdmin.from("leads").select("*", { count: "exact", head: true });
+      const { count } = await supabaseAdmin
+        .from("leads")
+        .select("*", { count: "exact", head: true });
       uploaded = count ?? 0;
     }
 
@@ -191,7 +193,9 @@ export const getCallers = createServerFn({ method: "POST" })
 
     const [{ data: leads }, { data: atts }, { data: cs }, { data: users }] = await Promise.all([
       supabaseAdmin.from("leads").select("id, assigned_to_email"),
-      supabaseAdmin.from("call_attempts").select("lead_id, attempt_number, connected, outcome, attempted_by"),
+      supabaseAdmin
+        .from("call_attempts")
+        .select("lead_id, attempt_number, connected, outcome, attempted_by"),
       supabaseAdmin.from("calling_status").select("lead_id, status"),
       supabaseAdmin.from("users").select("email, name"),
     ]);
@@ -199,13 +203,25 @@ export const getCallers = createServerFn({ method: "POST" })
     const filteredLeads = (leads ?? []).filter((l) => !dateIds || dateIds.has(l.id));
     const leadIds = new Set(filteredLeads.map((l) => l.id));
 
-    type Row = { email: string; name: string; assigned: number; a1: number; a2: number; a3: number; connected: number };
+    type Row = {
+      email: string;
+      name: string;
+      assigned: number;
+      a1: number;
+      a2: number;
+      a3: number;
+      connected: number;
+    };
     const map = new Map<string, Row>();
     function ensure(email: string): Row {
       const r = map.get(email) ?? {
         email,
         name: nameByEmail.get(email) ?? email,
-        assigned: 0, a1: 0, a2: 0, a3: 0, connected: 0,
+        assigned: 0,
+        a1: 0,
+        a2: 0,
+        a3: 0,
+        connected: 0,
       };
       map.set(email, r);
       return r;
@@ -254,7 +270,13 @@ export const getRoundWorkers = createServerFn({ method: "POST" })
     type Row = { email: string; name: string; assigned: number; done: number; passed: number };
     const map = new Map<string, Row>();
     function ensure(email: string): Row {
-      const r = map.get(email) ?? { email, name: nameByEmail.get(email) ?? email, assigned: 0, done: 0, passed: 0 };
+      const r = map.get(email) ?? {
+        email,
+        name: nameByEmail.get(email) ?? email,
+        assigned: 0,
+        done: 0,
+        passed: 0,
+      };
       map.set(email, r);
       return r;
     }
@@ -287,7 +309,13 @@ export const getCreationAgents = createServerFn({ method: "POST" })
     type Row = { email: string; name: string; assigned: number; created: number; active: number };
     const map = new Map<string, Row>();
     function ensure(email: string): Row {
-      const r = map.get(email) ?? { email, name: nameByEmail.get(email) ?? email, assigned: 0, created: 0, active: 0 };
+      const r = map.get(email) ?? {
+        email,
+        name: nameByEmail.get(email) ?? email,
+        assigned: 0,
+        created: 0,
+        active: 0,
+      };
       map.set(email, r);
       return r;
     }
@@ -341,7 +369,10 @@ export const getTAT = createServerFn({ method: "POST" })
       if (s.status === "connected" && leadById.has(s.lead_id)) connectedAt.set(s.lead_id, s.set_at);
     }
     // Rounds by lead+number
-    const roundMap = new Map<string, Map<number, { started_at: string; submitted_at: string | null }>>();
+    const roundMap = new Map<
+      string,
+      Map<number, { started_at: string; submitted_at: string | null }>
+    >();
     for (const r of rounds ?? []) {
       if (!leadById.has(r.lead_id)) continue;
       const m = roundMap.get(r.lead_id) ?? new Map();
@@ -352,14 +383,20 @@ export const getTAT = createServerFn({ method: "POST" })
     function statsHours(diffs: number[]): { avg: number; min: number; max: number; n: number } {
       if (diffs.length === 0) return { avg: 0, min: 0, max: 0, n: 0 };
       const avg = diffs.reduce((s, x) => s + x, 0) / diffs.length;
-      return { avg: round1(avg), min: round1(Math.min(...diffs)), max: round1(Math.max(...diffs)), n: diffs.length };
+      return {
+        avg: round1(avg),
+        min: round1(Math.min(...diffs)),
+        max: round1(Math.max(...diffs)),
+        n: diffs.length,
+      };
     }
 
     function diff(a: string, b: string): number {
       return (new Date(b).getTime() - new Date(a).getTime()) / 3600000;
     }
 
-    const out: Array<{ label: string; threshold: number; stats: ReturnType<typeof statsHours> }> = [];
+    const out: Array<{ label: string; threshold: number; stats: ReturnType<typeof statsHours> }> =
+      [];
 
     // Lead -> First Attempt
     const d1: number[] = [];
@@ -502,7 +539,9 @@ async function resolveJoinFilterIds(f: AllLeadsFilterT): Promise<Set<string> | n
       invert = true;
     }
     let q = supabaseAdmin.from("leads").select("id");
-    q = invert ? q.not("current_stage", "in", `(${stages.join(",")})`) : q.in("current_stage", stages);
+    q = invert
+      ? q.not("current_stage", "in", `(${stages.join(",")})`)
+      : q.in("current_stage", stages);
     const { data } = await q;
     sets.push(new Set((data ?? []).map((x) => x.id)));
   }
@@ -514,11 +553,15 @@ async function resolveJoinFilterIds(f: AllLeadsFilterT): Promise<Set<string> | n
 
 function sortToColumn(sort: SortKeyT): { col: string; asc: boolean } {
   switch (sort) {
-    case "priority": return { col: "priority", asc: true };
-    case "stage": return { col: "current_stage", asc: true };
-    case "updated": return { col: "updated_at", asc: false };
+    case "priority":
+      return { col: "priority", asc: true };
+    case "stage":
+      return { col: "current_stage", asc: true };
+    case "updated":
+      return { col: "updated_at", asc: false };
     case "lead_date":
-    default: return { col: "lead_date", asc: false };
+    default:
+      return { col: "lead_date", asc: false };
   }
 }
 
@@ -528,7 +571,11 @@ function encodeCursor(c: Cursor): string {
   return Buffer.from(JSON.stringify(c)).toString("base64");
 }
 function decodeCursor(s: string): Cursor | null {
-  try { return JSON.parse(Buffer.from(s, "base64").toString("utf8")); } catch { return null; }
+  try {
+    return JSON.parse(Buffer.from(s, "base64").toString("utf8"));
+  } catch {
+    return null;
+  }
 }
 
 async function queryLeadsPage(f: AllLeadsFilterT, limit: number) {
@@ -607,9 +654,15 @@ type ListRow = {
   verdict: string;
   current_stage: string;
   updated_at: string;
+  calling_assignee: string;
+  round_1_assignee: string;
+  round_2_assignee: string;
+  expert_creation_assignee: string;
 };
 
-function roundLabel(r: { passed: boolean | null; submitted_at: string | null } | undefined): string {
+function roundLabel(
+  r: { passed: boolean | null; submitted_at: string | null } | undefined,
+): string {
   if (!r) return "—";
   if (r.passed === true) return "Passed";
   if (r.passed === false) return "Failed";
@@ -617,18 +670,20 @@ function roundLabel(r: { passed: boolean | null; submitted_at: string | null } |
   return "In Progress";
 }
 
-async function enrichLeads(
-  leads: Array<Record<string, unknown>>,
-): Promise<ListRow[]> {
+async function enrichLeads(leads: Array<Record<string, unknown>>): Promise<ListRow[]> {
   if (leads.length === 0) return [];
   const ids = leads.map((l) => l.id as string);
-  const [{ data: cs }, { data: rounds }] = await Promise.all([
+  const [{ data: cs }, { data: rounds }, { data: assignments }] = await Promise.all([
     supabaseAdmin.from("calling_status").select("lead_id, status").in("lead_id", ids),
     supabaseAdmin
       .from("interview_rounds")
       .select("lead_id, round_number, passed, submitted_at")
       .in("lead_id", ids)
       .in("round_number", [1, 2]),
+    supabaseAdmin
+      .from("lead_stage_assignments")
+      .select("lead_id, stage, assigned_email")
+      .in("lead_id", ids),
   ]);
   const csBy = new Map((cs ?? []).map((s) => [s.lead_id, s]));
   const r1By = new Map<string, { passed: boolean | null; submitted_at: string | null }>();
@@ -637,12 +692,19 @@ async function enrichLeads(
     if (r.round_number === 1) r1By.set(r.lead_id, r);
     else if (r.round_number === 2) r2By.set(r.lead_id, r);
   }
+  const chainBy = new Map<string, Record<string, string>>();
+  for (const a of assignments ?? []) {
+    const m = chainBy.get(a.lead_id) ?? {};
+    m[a.stage] = a.assigned_email;
+    chainBy.set(a.lead_id, m);
+  }
 
   return leads.map((l) => {
     const id = l.id as string;
     const stage = l.current_stage as string;
     const r1 = r1By.get(id);
     const r2 = r2By.get(id);
+    const chain = chainBy.get(id) ?? {};
     const verdict =
       stage === "active" || stage === "profile_created" || stage === "profile_creation_pending"
         ? "Passed"
@@ -663,6 +725,10 @@ async function enrichLeads(
       verdict,
       current_stage: stage,
       updated_at: l.updated_at as string,
+      calling_assignee: chain.calling ?? "—",
+      round_1_assignee: chain.round_1 ?? "—",
+      round_2_assignee: chain.round_2 ?? "—",
+      expert_creation_assignee: chain.expert_creation ?? "—",
     };
   });
 }
@@ -698,9 +764,21 @@ export const exportLeadsCsv = createServerFn({ method: "POST" })
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
     const header = [
-      "lead_id", "name", "contact", "lead_date", "caller",
-      "calling_status", "round_1_status", "round_2_status",
-      "verdict", "current_stage", "updated_at",
+      "lead_id",
+      "name",
+      "contact",
+      "lead_date",
+      "caller",
+      "calling_status",
+      "round_1_status",
+      "round_2_status",
+      "verdict",
+      "current_stage",
+      "updated_at",
+      "calling_assignee",
+      "round_1_assignee",
+      "round_2_assignee",
+      "expert_creation_assignee",
     ];
     const lines: string[] = [header.join(",")];
 
@@ -721,10 +799,24 @@ export const exportLeadsCsv = createServerFn({ method: "POST" })
       for (const r of rows) {
         lines.push(
           [
-            r.lead_id, r.name, r.contact, r.lead_date ?? "", r.caller,
-            r.calling_status, r.round_1_status, r.round_2_status,
-            r.verdict, r.current_stage, r.updated_at,
-          ].map(esc).join(","),
+            r.lead_id,
+            r.name,
+            r.contact,
+            r.lead_date ?? "",
+            r.caller,
+            r.calling_status,
+            r.round_1_status,
+            r.round_2_status,
+            r.verdict,
+            r.current_stage,
+            r.updated_at,
+            r.calling_assignee,
+            r.round_1_assignee,
+            r.round_2_assignee,
+            r.expert_creation_assignee,
+          ]
+            .map(esc)
+            .join(","),
         );
       }
       if (!hasMore) break;
@@ -748,4 +840,19 @@ export const listAllPeople = createServerFn({ method: "GET" }).handler(async () 
   await requireRole("admin");
   const { data } = await supabaseAdmin.from("users").select("email, name, role").order("name");
   return { people: data ?? [] };
+});
+
+// ============================================================
+// Duplicate log
+// ============================================================
+
+export const getDuplicateLog = createServerFn({ method: "GET" }).handler(async () => {
+  await requireRole("admin");
+  const { data, error } = await supabaseAdmin
+    .from("duplicate_log")
+    .select("*")
+    .order("detected_at", { ascending: false })
+    .limit(500);
+  if (error) throw error;
+  return { rows: data ?? [] };
 });

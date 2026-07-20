@@ -21,8 +21,7 @@ export function AppShell({
     await navigate({ to: "/login" });
   }
 
-  const navLinkBase =
-    "text-sm text-[#6B6B6B] hover:text-[#1A1A1A] transition-colors duration-150";
+  const navLinkBase = "text-sm text-[#6B6B6B] hover:text-[#1A1A1A] transition-colors duration-150";
   const activeProps = {
     className: "text-sm text-[#1A1A1A] font-semibold transition-colors duration-150",
   };
@@ -36,7 +35,12 @@ export function AppShell({
               <img src="/logo.svg" alt="AstroLokal" className="h-7 w-auto" />
             </Link>
             <nav className="flex items-center gap-6">
-              <Link to="/" className={navLinkBase} activeOptions={{ exact: true }} activeProps={activeProps}>
+              <Link
+                to="/"
+                className={navLinkBase}
+                activeOptions={{ exact: true }}
+                activeProps={activeProps}
+              >
                 Dashboard
               </Link>
               <Link to="/sync" className={navLinkBase} activeProps={activeProps}>
@@ -45,6 +49,11 @@ export function AppShell({
               {user.role === "admin" && (
                 <Link to="/admin" className={navLinkBase} activeProps={activeProps}>
                   Admin
+                </Link>
+              )}
+              {(user.role === "admin" || user.role === "kam") && (
+                <Link to="/admin/leads/add" className={navLinkBase} activeProps={activeProps}>
+                  Add Lead
                 </Link>
               )}
             </nav>

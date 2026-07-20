@@ -3,7 +3,13 @@ import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { getMe } from "@/lib/me.functions";
-import { syncCredentials, syncConfig, syncLeads, syncActiveExperts, writeLeadDump } from "@/lib/sync.functions";
+import {
+  syncCredentials,
+  syncConfig,
+  syncLeads,
+  syncActiveExperts,
+  writeLeadDump,
+} from "@/lib/sync.functions";
 import { AppShell } from "@/components/AppShell";
 
 export const Route = createFileRoute("/sync")({
@@ -69,7 +75,15 @@ function SyncPage() {
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem("sync-last-run");
-      if (raw) setLastRun({ leads: null, config: null, credentials: null, experts: null, dump: null, ...JSON.parse(raw) });
+      if (raw)
+        setLastRun({
+          leads: null,
+          config: null,
+          credentials: null,
+          experts: null,
+          dump: null,
+          ...JSON.parse(raw),
+        });
     } catch {
       /* ignore */
     }
@@ -81,7 +95,6 @@ function SyncPage() {
     const t = setInterval(() => setTick((n) => n + 1), 30_000);
     return () => clearInterval(t);
   }, []);
-  
 
   async function run(key: Key, label: string) {
     setBusy(key);
@@ -105,10 +118,19 @@ function SyncPage() {
 
   const items: Array<{ key: Key; label: string; desc: string; cta?: string }> = [
     { key: "leads", label: "Sync Leads", desc: "Pull new leads from the leads sheet." },
-    { key: "config", label: "Sync Config", desc: "Round settings, passing marks, questions, pools." },
+    {
+      key: "config",
+      label: "Sync Config",
+      desc: "Round settings, passing marks, questions, pools.",
+    },
     { key: "credentials", label: "Sync Team", desc: "Pull team members and their passwords." },
     { key: "experts", label: "Sync Active Experts", desc: "Mark linked profiles active." },
-    { key: "dump", label: "Write Lead Dump", desc: "Upsert every lead's current funnel state into the lead_dump tab.", cta: "Write" },
+    {
+      key: "dump",
+      label: "Write Lead Dump",
+      desc: "Upsert every lead's current funnel state into the lead_dump tab.",
+      cta: "Write",
+    },
   ];
 
   return (
@@ -117,9 +139,15 @@ function SyncPage() {
         <div>
           <h1 className="text-[28px] font-bold tracking-tight text-[#1A1A1A]">Sync</h1>
           <p className="mt-1 text-sm text-[#6B6B6B]">
-            All syncs run automatically every 15 minutes. Use the buttons below only when you need an immediate refresh.
+            All syncs run automatically every 15 minutes. Use the buttons below only when you need
+            an immediate refresh.
           </p>
         </div>
+
+        <p className="rounded-[8px] bg-[#FEEEE9] px-4 py-3 text-[13px] text-[#863013]">
+          Configuration can now be managed directly in Admin &gt; Config, Sources, and Team. Sheet
+          sync remains available as a fallback during the transition.
+        </p>
 
         <div className="overflow-hidden rounded-[10px] border border-[#EBEBEB] bg-white">
           <ul>
@@ -137,7 +165,8 @@ function SyncPage() {
                     Last synced: <span className="text-[#1A1A1A]">{fmtTime(lastRun[it.key])}</span>
                   </div>
                   <div className="text-[13px] text-[#6B6B6B]">
-                    Next sync: <span className="text-[#1A1A1A]">{fmtTime(nextSyncIso(OFFSETS[it.key]))}</span>
+                    Next sync:{" "}
+                    <span className="text-[#1A1A1A]">{fmtTime(nextSyncIso(OFFSETS[it.key]))}</span>
                   </div>
                 </div>
                 <button
@@ -153,7 +182,8 @@ function SyncPage() {
         </div>
 
         <p className="text-[13px] text-[#6B6B6B]">
-          Background sync runs every 15 minutes for all five jobs. You don't need to click anything — these buttons just force an immediate refresh.
+          Background sync runs every 15 minutes for all five jobs. You don't need to click anything
+          — these buttons just force an immediate refresh.
         </p>
       </div>
     </AppShell>
