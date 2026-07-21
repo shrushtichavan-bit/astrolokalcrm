@@ -296,8 +296,8 @@ export interface Database {
         Relationships: [];
       };
       crm_settings: {
-        Row: { id: number; cooldown_days: number; updated_at: string };
-        Insert: { id?: number; cooldown_days?: number; updated_at?: string };
+        Row: { id: number; cooldown_days: number; default_chain: Json | null; updated_at: string };
+        Insert: { id?: number; cooldown_days?: number; default_chain?: Json | null; updated_at?: string };
         Update: Partial<Database["public"]["Tables"]["crm_settings"]["Insert"]>;
         Relationships: [];
       };

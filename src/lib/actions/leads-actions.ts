@@ -10,6 +10,7 @@ import {
   assignedFor,
   loadRoundConfig,
   loadLeadOwned,
+  applyDefaultChain,
 } from "@/lib/helpers";
 import { findDuplicateLead, logDuplicate, normalizeContact } from "@/lib/dedup";
 
@@ -441,6 +442,11 @@ export async function insertLeadRow(input: {
     priority: input.priority,
     manual: true,
   });
+  // Auto-allotment: if the admin has configured a default chain (Admin >
+  // Allotment > Default Chain), apply it immediately so the lead doesn't sit
+  // unassigned. Admins can still override any stage for this lead later from
+  // the Unassigned/Assigned tabs — that upsert simply replaces this row.
+  await applyDefaultChain(inserted.id);
   return inserted;
 }
 

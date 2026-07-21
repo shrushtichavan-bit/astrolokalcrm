@@ -10,6 +10,7 @@ import {
   upsertLeadAssignments,
 } from "@/lib/actions/assignments-actions";
 import { getPool } from "@/lib/actions/leads-actions";
+import { getRoundConfig, getDefaultChain, upsertDefaultChain } from "@/lib/actions/config-actions";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { Card, CardContent } from "@/components/ui/card";
@@ -20,7 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ListChecks } from "lucide-react";
+import { ListChecks, CheckCircle2, AlertCircle } from "lucide-react";
 
 const STAGE_LABELS: Record<string, string> = {
   calling: "Telecaller",
@@ -117,9 +118,11 @@ export default function AllotmentPage() {
         <TabsList>
           <TabsTrigger value="unassigned">Unassigned</TabsTrigger>
           <TabsTrigger value="assigned">Assigned</TabsTrigger>
+          <TabsTrigger value="default-chain">Default Chain</TabsTrigger>
         </TabsList>
         <TabsContent value="unassigned"><UnassignedTab /></TabsContent>
         <TabsContent value="assigned"><AssignedTab /></TabsContent>
+        <TabsContent value="default-chain"><DefaultChainTab /></TabsContent>
       </Tabs>
     </div>
   );
@@ -266,6 +269,91 @@ function AssignedTab() {
       {editLead && (
         <AssignDialog open={!!editLead} onOpenChange={(v) => !v && setEditLead(null)} leadIds={[editLead.id]} requiredStages={requiredStages} initialChain={editLead.chain} onSaved={refresh} />
       )}
+    </div>
+  );
+}
+
+function DefaultChainTab() {
+  const qc = useQueryClient();
+  const cfgQ = useQuery({ queryKey: ["admin-round-config"], queryFn: () => getRoundConfig() });
+  const chainQ = useQuery({ queryKey: ["admin-default-chain"], queryFn: () => getDefaultChain() });
+  const numRounds = cfgQ.data?.num_rounds ?? 2;
+  const requiredStages = React.useMemo(
+    () => ["calling", ...Array.from({ length: numRounds }, (_, i) => `round_${i + 1}`), "expert_creation"],
+    [numRounds],
+  );
+
+  const [chain, setChain] = React.useState<Record<string, string>>({});
+  const [busy, setBusy] = React.useState(false);
+
+  React.useEffect(() => {
+    if (chainQ.data) setChain(chainQ.data.default_chain);
+  }, [chainQ.data]);
+
+  // Query all six possible stages (fixed length, safe for rules-of-hooks) —
+  // same pattern as AssignDialog above.
+  const poolQueries = ALL_STAGES.map((stage) =>
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    useQuery({ queryKey: ["pool", stage], queryFn: () => getPool({ stage }), staleTime: 5 * 60_000 }),
+  );
+  const poolByStage = new Map<string, (typeof poolQueries)[number]>(ALL_STAGES.map((stage, i) => [stage, poolQueries[i]]));
+
+  const isActive = Object.values(chainQ.data?.default_chain ?? {}).some((v) => !!v);
+
+  async function save() {
+    setBusy(true);
+    try {
+      const cleaned = Object.fromEntries(requiredStages.filter((s) => chain[s]).map((s) => [s, chain[s]]));
+      await upsertDefaultChain({ default_chain: cleaned });
+      toast.success("Default chain saved.");
+      qc.invalidateQueries({ queryKey: ["admin-default-chain"] });
+    } catch (e) {
+      toast.error("Something went wrong.", { description: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (cfgQ.isLoading || chainQ.isLoading) return <Skeleton className="mt-4 h-64 w-full" />;
+
+  return (
+    <div className="mt-4 space-y-4">
+      <div
+        className={`flex items-center gap-2 rounded-md px-4 py-3 text-sm ${
+          isActive ? "bg-success/10 text-success" : "bg-muted text-muted-foreground"
+        }`}
+      >
+        {isActive ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
+        {isActive
+          ? "Default chain active — all new leads will be auto-assigned"
+          : "No default chain set — leads require manual allotment"}
+      </div>
+
+      <Card>
+        <CardContent className="space-y-4 p-6">
+          <p className="text-sm text-muted-foreground">
+            Set one default person per stage. Every new lead (manual, CSV bulk upload, or future webhook) is
+            auto-assigned this chain immediately on creation — you can still override any stage for an individual
+            lead from the Unassigned or Assigned tabs at any time.
+          </p>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {requiredStages.map((stage) => (
+              <div key={stage}>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">{STAGE_LABELS[stage]}</label>
+                <Select value={chain[stage] ?? ""} onValueChange={(v) => setChain({ ...chain, [stage]: v })}>
+                  <SelectTrigger><SelectValue placeholder="No default" /></SelectTrigger>
+                  <SelectContent>
+                    {(poolByStage.get(stage)?.data?.members ?? []).map((m) => (
+                      <SelectItem key={m} value={m}>{m}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ))}
+          </div>
+          <Button onClick={save} disabled={busy}>{busy ? "Saving…" : "Save Default Chain"}</Button>
+        </CardContent>
+      </Card>
     </div>
   );
 }
