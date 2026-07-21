@@ -41,9 +41,9 @@ export interface Database {
           language: string | null;
           source: string | null;
           priority: number;
-          assigned_to_email: string;
+          assigned_to_email: string | null;
           current_stage: string;
-          current_owner_email: string;
+          current_owner_email: string | null;
           lead_date: string | null;
           closed_at: string | null;
           created_at: string;
@@ -59,9 +59,9 @@ export interface Database {
           language?: string | null;
           source?: string | null;
           priority?: number;
-          assigned_to_email: string;
+          assigned_to_email?: string | null;
           current_stage?: string;
-          current_owner_email: string;
+          current_owner_email?: string | null;
           lead_date?: string | null;
           closed_at?: string | null;
           created_at?: string;

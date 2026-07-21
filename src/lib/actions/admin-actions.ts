@@ -144,7 +144,9 @@ export async function getCallers(input: DateOnlyT) {
     map.set(email, r);
     return r;
   }
-  for (const l of filteredLeads) ensure(l.assigned_to_email).assigned++;
+  for (const l of filteredLeads) {
+    if (l.assigned_to_email) ensure(l.assigned_to_email).assigned++;
+  }
   for (const a of atts ?? []) {
     if (!leadIds.has(a.lead_id)) continue;
     const r = ensure(a.attempted_by);
@@ -156,7 +158,7 @@ export async function getCallers(input: DateOnlyT) {
     if (!leadIds.has(s.lead_id)) continue;
     if (s.status === "connected") {
       const lead = filteredLeads.find((x) => x.id === s.lead_id);
-      if (lead) ensure(lead.assigned_to_email).connected++;
+      if (lead?.assigned_to_email) ensure(lead.assigned_to_email).connected++;
     }
   }
   const rows = Array.from(map.values())
@@ -677,16 +679,21 @@ export async function forceAllowDuplicate(input: { duplicate_log_id: string }) {
     source: string;
     priority?: number | null;
     lead_date?: string | null;
-    assigned_telecaller_email: string;
+    assigned_telecaller_email?: string | null;
   };
 
   const normalized = normalizeContact(payload.contact);
   if (!normalized) throw new Error("Stored contact number is invalid");
 
-  const telecaller = payload.assigned_telecaller_email.toLowerCase();
-  const callingPool = await poolMembers("calling");
-  if (!callingPool.includes(telecaller))
-    throw new Error(`Stored telecaller (${telecaller}) is no longer in the calling pool — reassign manually instead`);
+  // Telecaller is optional — if the original submission didn't have one (or
+  // it's no longer in the calling pool), the recreated lead just lands in
+  // the Unassigned tab for the admin to allot from there instead.
+  let telecaller: string | null = null;
+  if (payload.assigned_telecaller_email) {
+    const candidate = payload.assigned_telecaller_email.toLowerCase();
+    const callingPool = await poolMembers("calling");
+    if (callingPool.includes(candidate)) telecaller = candidate;
+  }
 
   const priority = await resolvePriority(payload.source, payload.priority ?? null);
   const inserted = await insertLeadRow({

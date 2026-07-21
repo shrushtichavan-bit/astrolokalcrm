@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Users2 } from "lucide-react";
@@ -27,11 +28,20 @@ const PAGE_SIZE = 100;
 const MAX_RENDERED = 300;
 
 export default function AllLeadsPage() {
+  return (
+    <React.Suspense fallback={<Skeleton className="h-64 w-full" />}>
+      <AllLeadsPageInner />
+    </React.Suspense>
+  );
+}
+
+function AllLeadsPageInner() {
+  const searchParams = useSearchParams();
   const [from, setFrom] = React.useState("");
   const [to, setTo] = React.useState("");
   const [person, setPerson] = React.useState("");
-  const [stage, setStage] = React.useState("");
-  const [status, setStatus] = React.useState("");
+  const [stage, setStage] = React.useState(() => searchParams.get("stage") ?? "");
+  const [status, setStatus] = React.useState(() => searchParams.get("status") ?? "");
   const [verdict, setVerdict] = React.useState("");
   const [sort, setSort] = React.useState<SortKey>("lead_date");
 

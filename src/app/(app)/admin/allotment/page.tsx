@@ -3,139 +3,117 @@
 import * as React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { ListChecks, ChevronDown } from "lucide-react";
 import {
-  getUnassignedLeads,
-  listAssignedLeads,
-  getLeadAssignments,
-  upsertLeadAssignments,
+  getUnassignedTelecallerLeads,
+  getUnassignedFilterOptions,
+  getAssignedTelecallerLeads,
+  assignTelecallerBulk,
 } from "@/lib/actions/assignments-actions";
 import { getPool } from "@/lib/actions/leads-actions";
-import { getRoundConfig, getDefaultChain, upsertDefaultChain } from "@/lib/actions/config-actions";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
+import { PriorityBadge } from "@/components/priority-badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuCheckboxItem,
+} from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ListChecks, CheckCircle2, AlertCircle } from "lucide-react";
 
-const STAGE_LABELS: Record<string, string> = {
-  calling: "Telecaller",
-  round_1: "Round 1 Taker",
-  round_2: "Round 2 Taker",
-  round_3: "Round 3 Taker",
-  round_4: "Round 4 Taker",
-  expert_creation: "Expert Creation Agent",
-};
+function formatContact(c: string): string {
+  const digits = (c ?? "").replace(/\D/g, "");
+  return digits.length === 10 ? `${digits.slice(0, 5)} ${digits.slice(5)}` : c;
+}
 
-const ALL_STAGES = ["calling", "round_1", "round_2", "round_3", "round_4", "expert_creation"] as const;
-
-function AssignDialog({
-  open,
-  onOpenChange,
-  leadIds,
-  requiredStages,
-  initialChain,
-  onSaved,
+function MultiSelectFilter({
+  label,
+  options,
+  selected,
+  onChange,
 }: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  leadIds: string[];
-  requiredStages: string[];
-  initialChain?: Record<string, string>;
-  onSaved: () => void;
+  label: string;
+  options: { value: string; label: string }[];
+  selected: string[];
+  onChange: (v: string[]) => void;
 }) {
-  const [chain, setChain] = React.useState<Record<string, string>>(initialChain ?? {});
-  const [busy, setBusy] = React.useState(false);
-
-  React.useEffect(() => {
-    setChain(initialChain ?? {});
-  }, [initialChain, open]);
-
-  const poolQueries = ALL_STAGES.map((stage) =>
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    useQuery({ queryKey: ["pool", stage], queryFn: () => getPool({ stage }), staleTime: 5 * 60_000, enabled: open }),
-  );
-  const poolByStage = new Map<string, (typeof poolQueries)[number]>(ALL_STAGES.map((stage, i) => [stage, poolQueries[i]]));
-
-  async function save() {
-    const assignments = requiredStages.filter((s) => chain[s]).map((s) => ({ stage: s, assigned_email: chain[s] }));
-    if (assignments.length === 0) {
-      toast.warning("Assign at least one stage.");
-      return;
-    }
-    setBusy(true);
-    try {
-      await upsertLeadAssignments({ lead_ids: leadIds, assignments });
-      toast.success(`Chain saved for ${leadIds.length} lead${leadIds.length === 1 ? "" : "s"}.`);
-      onOpenChange(false);
-      onSaved();
-    } catch (e) {
-      toast.error("Something went wrong.", { description: (e as Error).message });
-    } finally {
-      setBusy(false);
-    }
+  function toggle(v: string) {
+    onChange(selected.includes(v) ? selected.filter((x) => x !== v) : [...selected, v]);
   }
-
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Assign chain for {leadIds.length} lead{leadIds.length === 1 ? "" : "s"}</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-3">
-          {requiredStages.map((stage) => (
-            <div key={stage}>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">{STAGE_LABELS[stage]}</label>
-              <Select value={chain[stage] ?? ""} onValueChange={(v) => setChain({ ...chain, [stage]: v })}>
-                <SelectTrigger><SelectValue placeholder="Select person" /></SelectTrigger>
-                <SelectContent>
-                  {(poolByStage.get(stage)?.data?.members ?? []).map((m) => (
-                    <SelectItem key={m} value={m}>{m}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          ))}
-        </div>
-        <DialogFooter>
-          <Button onClick={save} disabled={busy}>{busy ? "Saving…" : "Save Chain"}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" className="justify-between font-normal">
+          {label}{selected.length > 0 ? ` (${selected.length})` : ""}
+          <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="max-h-64 overflow-y-auto">
+        {options.length === 0 && <div className="px-2 py-1.5 text-xs text-muted-foreground">No options</div>}
+        {options.map((o) => (
+          <DropdownMenuCheckboxItem key={o.value} checked={selected.includes(o.value)} onCheckedChange={() => toggle(o.value)}>
+            {o.label}
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
 export default function AllotmentPage() {
   return (
     <div>
-      <PageHeader title="Allotment" description="Assign the full stage chain — telecaller through expert creation — for each lead." />
+      <PageHeader title="Allotment" description="Assign a telecaller to new leads. Every stage after that is picked by whoever's working the lead, as they go." />
       <Tabs defaultValue="unassigned" className="w-full">
         <TabsList>
           <TabsTrigger value="unassigned">Unassigned</TabsTrigger>
           <TabsTrigger value="assigned">Assigned</TabsTrigger>
-          <TabsTrigger value="default-chain">Default Chain</TabsTrigger>
         </TabsList>
         <TabsContent value="unassigned"><UnassignedTab /></TabsContent>
         <TabsContent value="assigned"><AssignedTab /></TabsContent>
-        <TabsContent value="default-chain"><DefaultChainTab /></TabsContent>
       </Tabs>
     </div>
   );
 }
 
+const PRIORITY_OPTIONS = [1, 2, 3, 4, 5].map((n) => ({ value: String(n), label: `P${n}` }));
+
 function UnassignedTab() {
   const qc = useQueryClient();
-  const q = useQuery({ queryKey: ["admin-unassigned-leads"], queryFn: () => getUnassignedLeads() });
+  const [sources, setSources] = React.useState<string[]>([]);
+  const [priorities, setPriorities] = React.useState<string[]>([]);
+  const [languages, setLanguages] = React.useState<string[]>([]);
+  const [from, setFrom] = React.useState("");
+  const [to, setTo] = React.useState("");
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
-  const [dialogFor, setDialogFor] = React.useState<string[] | null>(null);
+  const [assignTo, setAssignTo] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+
+  const optionsQ = useQuery({ queryKey: ["allotment-filter-options"], queryFn: () => getUnassignedFilterOptions() });
+  const poolQ = useQuery({ queryKey: ["pool", "calling"], queryFn: () => getPool({ stage: "calling" }), staleTime: 5 * 60_000 });
+
+  const filters = React.useMemo(
+    () => ({
+      sources: sources.length ? sources : null,
+      priorities: priorities.length ? priorities.map((p) => parseInt(p, 10)) : null,
+      languages: languages.length ? languages : null,
+      from: from || null,
+      to: to || null,
+    }),
+    [sources, priorities, languages, from, to],
+  );
+  const q = useQuery({ queryKey: ["admin-unassigned-leads", filters], queryFn: () => getUnassignedTelecallerLeads(filters) });
 
   const leads = q.data?.leads ?? [];
-  const requiredStages = q.data?.required_stages ?? ["calling", "round_1", "expert_creation"];
 
   function toggle(id: string) {
     const next = new Set(selected);
@@ -146,167 +124,20 @@ function UnassignedTab() {
   function toggleAll() {
     setSelected(selected.size === leads.length ? new Set() : new Set(leads.map((l) => l.id)));
   }
-  function refresh() {
-    setSelected(new Set());
-    qc.invalidateQueries({ queryKey: ["admin-unassigned-leads"] });
-    qc.invalidateQueries({ queryKey: ["admin-assigned-leads"] });
-  }
 
-  if (q.isLoading) return <Skeleton className="mt-4 h-64 w-full" />;
-
-  return (
-    <div className="mt-4 space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="text-sm text-muted-foreground">
-          {leads.length} lead{leads.length === 1 ? "" : "s"} without a complete assignment chain, sorted by priority then lead date.
-        </div>
-        <Button size="sm" disabled={selected.size === 0} onClick={() => setDialogFor(Array.from(selected))}>
-          Bulk Assign ({selected.size})
-        </Button>
-      </div>
-      {leads.length === 0 ? (
-        <EmptyState icon={ListChecks} title="Every lead has a complete chain" description="Nothing left to assign right now." />
-      ) : (
-        <Card>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-8"><Checkbox checked={leads.length > 0 && selected.size === leads.length} onCheckedChange={toggleAll} /></TableHead>
-                  <TableHead>Lead ID</TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Source</TableHead>
-                  <TableHead className="text-right">Priority</TableHead>
-                  <TableHead>Lead Date</TableHead>
-                  <TableHead>Stage</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {leads.map((l) => (
-                  <TableRow key={l.id}>
-                    <TableCell><Checkbox checked={selected.has(l.id)} onCheckedChange={() => toggle(l.id)} /></TableCell>
-                    <TableCell className="font-mono text-xs">{l.lead_id}</TableCell>
-                    <TableCell>{l.name}</TableCell>
-                    <TableCell className="text-muted-foreground">{l.source ?? "—"}</TableCell>
-                    <TableCell className="text-right tabular-nums">{l.priority}</TableCell>
-                    <TableCell className="text-muted-foreground">{l.lead_date ?? "—"}</TableCell>
-                    <TableCell className="text-xs">{l.current_stage}</TableCell>
-                    <TableCell className="text-right">
-                      <Button size="sm" variant="outline" onClick={() => setDialogFor([l.id])}>Assign</Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
-      {dialogFor && (
-        <AssignDialog open={!!dialogFor} onOpenChange={(v) => !v && setDialogFor(null)} leadIds={dialogFor} requiredStages={requiredStages} onSaved={refresh} />
-      )}
-    </div>
-  );
-}
-
-function AssignedTab() {
-  const qc = useQueryClient();
-  const q = useQuery({ queryKey: ["admin-assigned-leads"], queryFn: () => listAssignedLeads() });
-  const [editLead, setEditLead] = React.useState<{ id: string; chain: Record<string, string> } | null>(null);
-
-  const leads = q.data?.leads ?? [];
-  const requiredStages = q.data?.required_stages ?? ["calling", "round_1", "expert_creation"];
-
-  async function openEdit(id: string) {
-    const r = await getLeadAssignments({ lead_id: id });
-    const chain: Record<string, string> = {};
-    for (const a of r.assignments) chain[a.stage] = a.assigned_email;
-    setEditLead({ id, chain });
-  }
-  function refresh() {
-    qc.invalidateQueries({ queryKey: ["admin-assigned-leads"] });
-    qc.invalidateQueries({ queryKey: ["admin-unassigned-leads"] });
-  }
-
-  if (q.isLoading) return <Skeleton className="mt-4 h-64 w-full" />;
-
-  return (
-    <div className="mt-4 space-y-4">
-      {leads.length === 0 ? (
-        <EmptyState icon={ListChecks} title="No assigned leads yet" description="Assign a chain from the Unassigned tab to get started." />
-      ) : (
-        <Card>
-          <CardContent className="overflow-x-auto p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Lead ID</TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Stage</TableHead>
-                  {requiredStages.map((s) => <TableHead key={s}>{STAGE_LABELS[s]}</TableHead>)}
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {leads.map((l) => (
-                  <TableRow key={l.id}>
-                    <TableCell className="font-mono text-xs">{l.lead_id}</TableCell>
-                    <TableCell>{l.name}</TableCell>
-                    <TableCell className="text-xs">{l.current_stage}</TableCell>
-                    {requiredStages.map((s) => (
-                      <TableCell key={s} className="text-xs text-muted-foreground">{(l.chain as Record<string, string>)[s] ?? "—"}</TableCell>
-                    ))}
-                    <TableCell className="text-right">
-                      <Button size="sm" variant="outline" onClick={() => openEdit(l.id)}>Edit</Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
-      {editLead && (
-        <AssignDialog open={!!editLead} onOpenChange={(v) => !v && setEditLead(null)} leadIds={[editLead.id]} requiredStages={requiredStages} initialChain={editLead.chain} onSaved={refresh} />
-      )}
-    </div>
-  );
-}
-
-function DefaultChainTab() {
-  const qc = useQueryClient();
-  const cfgQ = useQuery({ queryKey: ["admin-round-config"], queryFn: () => getRoundConfig() });
-  const chainQ = useQuery({ queryKey: ["admin-default-chain"], queryFn: () => getDefaultChain() });
-  const numRounds = cfgQ.data?.num_rounds ?? 2;
-  const requiredStages = React.useMemo(
-    () => ["calling", ...Array.from({ length: numRounds }, (_, i) => `round_${i + 1}`), "expert_creation"],
-    [numRounds],
-  );
-
-  const [chain, setChain] = React.useState<Record<string, string>>({});
-  const [busy, setBusy] = React.useState(false);
-
-  React.useEffect(() => {
-    if (chainQ.data) setChain(chainQ.data.default_chain);
-  }, [chainQ.data]);
-
-  // Query all six possible stages (fixed length, safe for rules-of-hooks) —
-  // same pattern as AssignDialog above.
-  const poolQueries = ALL_STAGES.map((stage) =>
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    useQuery({ queryKey: ["pool", stage], queryFn: () => getPool({ stage }), staleTime: 5 * 60_000 }),
-  );
-  const poolByStage = new Map<string, (typeof poolQueries)[number]>(ALL_STAGES.map((stage, i) => [stage, poolQueries[i]]));
-
-  const isActive = Object.values(chainQ.data?.default_chain ?? {}).some((v) => !!v);
-
-  async function save() {
+  async function assign() {
+    if (!assignTo) {
+      toast.warning("Select a telecaller first.");
+      return;
+    }
     setBusy(true);
     try {
-      const cleaned = Object.fromEntries(requiredStages.filter((s) => chain[s]).map((s) => [s, chain[s]]));
-      await upsertDefaultChain({ default_chain: cleaned });
-      toast.success("Default chain saved.");
-      qc.invalidateQueries({ queryKey: ["admin-default-chain"] });
+      const r = await assignTelecallerBulk({ lead_ids: Array.from(selected), telecaller_email: assignTo });
+      toast.success(`${r.count} lead${r.count === 1 ? "" : "s"} assigned to ${assignTo}`);
+      setSelected(new Set());
+      setAssignTo("");
+      qc.invalidateQueries({ queryKey: ["admin-unassigned-leads"] });
+      qc.invalidateQueries({ queryKey: ["admin-assigned-leads"] });
     } catch (e) {
       toast.error("Something went wrong.", { description: (e as Error).message });
     } finally {
@@ -314,46 +145,187 @@ function DefaultChainTab() {
     }
   }
 
-  if (cfgQ.isLoading || chainQ.isLoading) return <Skeleton className="mt-4 h-64 w-full" />;
+  const sourceOptions = (optionsQ.data?.sources ?? []).map((s) => ({ value: s, label: s }));
+  const languageOptions = (optionsQ.data?.languages ?? []).map((l) => ({ value: l, label: l }));
+
+  return (
+    <div className="mt-4 space-y-4 pb-20">
+      <Card>
+        <CardContent className="flex flex-wrap items-end gap-3 p-4">
+          <MultiSelectFilter label="Source" options={sourceOptions} selected={sources} onChange={setSources} />
+          <MultiSelectFilter label="Priority" options={PRIORITY_OPTIONS} selected={priorities} onChange={setPriorities} />
+          <MultiSelectFilter label="Language" options={languageOptions} selected={languages} onChange={setLanguages} />
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">From</label>
+            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-36" />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">To</label>
+            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="w-36" />
+          </div>
+          {(sources.length > 0 || priorities.length > 0 || languages.length > 0 || from || to) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setSources([]);
+                setPriorities([]);
+                setLanguages([]);
+                setFrom("");
+                setTo("");
+              }}
+            >
+              Clear filters
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+
+      {q.isLoading ? (
+        <Skeleton className="h-64 w-full" />
+      ) : leads.length === 0 ? (
+        <EmptyState icon={ListChecks} title="Nothing unassigned" description="Every lead matching these filters already has a telecaller." />
+      ) : (
+        <Card>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-8"><Checkbox checked={leads.length > 0 && selected.size === leads.length} onCheckedChange={toggleAll} /></TableHead>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Contact</TableHead>
+                  <TableHead>Source</TableHead>
+                  <TableHead>Priority</TableHead>
+                  <TableHead>Lead Date</TableHead>
+                  <TableHead>Language</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {leads.map((l) => (
+                  <TableRow key={l.id}>
+                    <TableCell><Checkbox checked={selected.has(l.id)} onCheckedChange={() => toggle(l.id)} /></TableCell>
+                    <TableCell className="font-medium">{l.name}</TableCell>
+                    <TableCell className="tabular-nums text-muted-foreground">{formatContact(l.contact)}</TableCell>
+                    <TableCell>
+                      {l.source ? <Badge variant="secondary">{l.source}</Badge> : <span className="text-muted-foreground">—</span>}
+                    </TableCell>
+                    <TableCell><PriorityBadge priority={l.priority} /></TableCell>
+                    <TableCell className="text-muted-foreground">{l.lead_date ?? "—"}</TableCell>
+                    <TableCell className="text-muted-foreground">{l.language ?? "—"}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {selected.size > 0 && (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card px-6 py-4 shadow-lg md:left-64">
+          <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-3">
+            <span className="text-sm font-medium text-foreground">{selected.size} lead{selected.size === 1 ? "" : "s"} selected</span>
+            <Select value={assignTo} onValueChange={setAssignTo}>
+              <SelectTrigger className="w-64"><SelectValue placeholder="Select telecaller" /></SelectTrigger>
+              <SelectContent>
+                {(poolQ.data?.members ?? []).map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Button onClick={assign} disabled={busy}>{busy ? "Assigning…" : "Assign Telecaller"}</Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AssignedTab() {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["admin-assigned-leads"], queryFn: () => getAssignedTelecallerLeads() });
+  const poolQ = useQuery({ queryKey: ["pool", "calling"], queryFn: () => getPool({ stage: "calling" }), staleTime: 5 * 60_000 });
+  const [reassigningId, setReassigningId] = React.useState<string | null>(null);
+  const [reassignTo, setReassignTo] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+
+  const leads = q.data?.leads ?? [];
+
+  function startReassign(id: string, current: string | null) {
+    setReassigningId(id);
+    setReassignTo(current ?? "");
+  }
+
+  async function confirmReassign(id: string) {
+    if (!reassignTo) {
+      toast.warning("Select a telecaller first.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await assignTelecallerBulk({ lead_ids: [id], telecaller_email: reassignTo });
+      toast.success(`Reassigned to ${reassignTo}.`);
+      setReassigningId(null);
+      qc.invalidateQueries({ queryKey: ["admin-assigned-leads"] });
+    } catch (e) {
+      toast.error("Something went wrong.", { description: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (q.isLoading) return <Skeleton className="mt-4 h-64 w-full" />;
 
   return (
     <div className="mt-4 space-y-4">
-      <div
-        className={`flex items-center gap-2 rounded-md px-4 py-3 text-sm ${
-          isActive ? "bg-success/10 text-success" : "bg-muted text-muted-foreground"
-        }`}
-      >
-        {isActive ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
-        {isActive
-          ? "Default chain active — all new leads will be auto-assigned"
-          : "No default chain set — leads require manual allotment"}
-      </div>
-
-      <Card>
-        <CardContent className="space-y-4 p-6">
-          <p className="text-sm text-muted-foreground">
-            Set one default person per stage. Every new lead (manual, CSV bulk upload, or future webhook) is
-            auto-assigned this chain immediately on creation — you can still override any stage for an individual
-            lead from the Unassigned or Assigned tabs at any time.
-          </p>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {requiredStages.map((stage) => (
-              <div key={stage}>
-                <label className="mb-1 block text-xs font-medium text-muted-foreground">{STAGE_LABELS[stage]}</label>
-                <Select value={chain[stage] ?? ""} onValueChange={(v) => setChain({ ...chain, [stage]: v })}>
-                  <SelectTrigger><SelectValue placeholder="No default" /></SelectTrigger>
-                  <SelectContent>
-                    {(poolByStage.get(stage)?.data?.members ?? []).map((m) => (
-                      <SelectItem key={m} value={m}>{m}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            ))}
-          </div>
-          <Button onClick={save} disabled={busy}>{busy ? "Saving…" : "Save Default Chain"}</Button>
-        </CardContent>
-      </Card>
+      {leads.length === 0 ? (
+        <EmptyState icon={ListChecks} title="No assigned leads yet" description="Assign a telecaller from the Unassigned tab to get started." />
+      ) : (
+        <Card>
+          <CardContent className="overflow-x-auto p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Contact</TableHead>
+                  <TableHead>Source</TableHead>
+                  <TableHead>Priority</TableHead>
+                  <TableHead>Assigned Telecaller</TableHead>
+                  <TableHead>Current Stage</TableHead>
+                  <TableHead>Lead Date</TableHead>
+                  <TableHead />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {leads.map((l) => (
+                  <TableRow key={l.id}>
+                    <TableCell className="font-medium">{l.name}</TableCell>
+                    <TableCell className="tabular-nums text-muted-foreground">{formatContact(l.contact)}</TableCell>
+                    <TableCell className="text-muted-foreground">{l.source ?? "—"}</TableCell>
+                    <TableCell><PriorityBadge priority={l.priority} /></TableCell>
+                    <TableCell className="text-muted-foreground">{l.assigned_to_email}</TableCell>
+                    <TableCell className="text-xs">{l.current_stage}</TableCell>
+                    <TableCell className="text-muted-foreground">{l.lead_date ?? "—"}</TableCell>
+                    <TableCell className="text-right">
+                      {reassigningId === l.id ? (
+                        <div className="flex items-center justify-end gap-2">
+                          <Select value={reassignTo} onValueChange={setReassignTo}>
+                            <SelectTrigger className="h-8 w-44"><SelectValue placeholder="Telecaller" /></SelectTrigger>
+                            <SelectContent>
+                              {(poolQ.data?.members ?? []).map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                          <Button size="sm" disabled={busy} onClick={() => confirmReassign(l.id)}>Confirm</Button>
+                          <Button size="sm" variant="ghost" onClick={() => setReassigningId(null)}>Cancel</Button>
+                        </div>
+                      ) : (
+                        <Button size="sm" variant="outline" onClick={() => startReassign(l.id, l.assigned_to_email)}>Reassign</Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

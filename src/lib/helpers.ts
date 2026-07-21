@@ -40,15 +40,20 @@ export async function poolMembers(stage: string): Promise<string[]> {
   return (data ?? []).map((r) => r.eligible_email);
 }
 
-/** Who's pre-assigned to a lead for a given stage, per the admin-set chain. */
-export async function assignedFor(leadId: string, stage: string): Promise<string | null> {
-  const { data } = await supabaseAdmin
+/**
+ * Records who was picked, just-in-time, to take a lead's next stage. This is
+ * the ONLY way lead_stage_assignments gets written now — there's no more
+ * upfront pre-population. Still used to power the Lead Timeline's "assigned
+ * to" display and the People/Funnel assignment-count views.
+ */
+export async function recordStageAssignment(leadId: string, stage: string, email: string, assignedBy: string) {
+  const { error } = await supabaseAdmin
     .from("lead_stage_assignments")
-    .select("assigned_email")
-    .eq("lead_id", leadId)
-    .eq("stage", stage)
-    .maybeSingle();
-  return data?.assigned_email ?? null;
+    .upsert(
+      { lead_id: leadId, stage, assigned_email: email.toLowerCase(), assigned_by: assignedBy, assigned_at: new Date().toISOString() },
+      { onConflict: "lead_id,stage" },
+    );
+  if (error) throw new Error(error.message);
 }
 
 export async function loadRoundConfig() {
@@ -75,32 +80,4 @@ export async function loadLeadOwned(leadId: string, ownerEmail: string, opts: { 
 
 export function round1(n: number): number {
   return Math.round(n * 10) / 10;
-}
-
-/** The admin-configured default stage → email chain, applied to every new lead at creation. */
-export async function getEffectiveDefaultChain(): Promise<Record<string, string>> {
-  const { data } = await supabaseAdmin.from("crm_settings").select("default_chain").eq("id", 1).maybeSingle();
-  return (data?.default_chain as Record<string, string> | null) ?? {};
-}
-
-/** Writes the default chain into lead_stage_assignments for a freshly-created lead. Best-effort — never throws. */
-export async function applyDefaultChain(leadId: string) {
-  try {
-    const chain = await getEffectiveDefaultChain();
-    const entries = Object.entries(chain).filter(([, email]) => !!email);
-    if (entries.length === 0) return;
-    const rows = entries.map(([stage, email]) => ({
-      lead_id: leadId,
-      stage,
-      assigned_email: email.toLowerCase(),
-      assigned_by: "system:default_chain",
-      assigned_at: new Date().toISOString(),
-    }));
-    const { error } = await supabaseAdmin.from("lead_stage_assignments").upsert(rows, { onConflict: "lead_id,stage" });
-    if (error) throw error;
-    await appendAudit(leadId, "default_chain_applied", "system:default_chain", { chain: Object.fromEntries(entries) });
-  } catch (e) {
-    // Never let a default-chain hiccup fail lead creation itself.
-    console.error(`[applyDefaultChain] failed for lead ${leadId}:`, e);
-  }
 }

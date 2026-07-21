@@ -117,29 +117,3 @@ export async function upsertCrmSettings(input: { cooldown_days: number }) {
   return { ok: true };
 }
 
-// ---------- Default chain (auto-allotment) ----------
-
-const DefaultChainSchema = z.object(
-  Object.fromEntries(STAGES.map((s) => [s, z.string().email().max(255).nullish()])),
-) as z.ZodType<Partial<Record<(typeof STAGES)[number], string | null | undefined>>>;
-
-export async function getDefaultChain() {
-  await requireRole("admin");
-  const { data } = await supabaseAdmin.from("crm_settings").select("default_chain").eq("id", 1).maybeSingle();
-  const chain = (data?.default_chain as Record<string, string> | null) ?? {};
-  return { default_chain: chain };
-}
-
-export async function upsertDefaultChain(input: { default_chain: Record<string, string | null | undefined> }) {
-  const data = z.object({ default_chain: DefaultChainSchema }).parse(input);
-  await requireRole("admin");
-  // Drop empty entries so a cleared dropdown actually removes that stage's default.
-  const cleaned = Object.fromEntries(
-    Object.entries(data.default_chain).filter(([, v]) => !!v).map(([k, v]) => [k, (v as string).toLowerCase()]),
-  );
-  const { error } = await supabaseAdmin
-    .from("crm_settings")
-    .upsert({ id: 1, default_chain: cleaned, updated_at: new Date().toISOString() });
-  if (error) throw new Error(error.message);
-  return { ok: true };
-}

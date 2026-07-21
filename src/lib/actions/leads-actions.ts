@@ -7,10 +7,9 @@ import {
   appendAudit,
   transitionLead,
   poolMembers,
-  assignedFor,
+  recordStageAssignment,
   loadRoundConfig,
   loadLeadOwned,
-  applyDefaultChain,
 } from "@/lib/helpers";
 import { findDuplicateLead, logDuplicate, normalizeContact } from "@/lib/dedup";
 
@@ -115,6 +114,7 @@ export async function logCallOutcome(input: {
   attempt_number: number;
   outcome: string;
   remarks?: string | null;
+  next_owner_email?: string | null;
 }) {
   const data = z
     .object({
@@ -122,6 +122,7 @@ export async function logCallOutcome(input: {
       attempt_number: z.number().int().min(1).max(3),
       outcome: z.enum(["connected", "rnr", "reconnect", "junk", "not_interested"]),
       remarks: z.string().max(2000).nullish(),
+      next_owner_email: z.string().email().max(255).nullish(),
     })
     .parse(input);
 
@@ -149,8 +150,11 @@ export async function logCallOutcome(input: {
 
   let assignedKam: string | null = null;
   if (data.outcome === "connected") {
-    assignedKam = await assignedFor(lead.id, "round_1");
-    if (!assignedKam) throw new Error("Round 1 taker not assigned — contact admin");
+    if (!data.next_owner_email) throw new Error("Select who takes Round 1 before submitting");
+    const target = data.next_owner_email.toLowerCase();
+    const round1Pool = await poolMembers("round_1");
+    if (!round1Pool.includes(target)) throw new Error("Selected person is not in the Round 1 pool");
+    assignedKam = target;
   }
 
   const { error: aErr } = await supabaseAdmin.from("call_attempts").upsert(
@@ -183,15 +187,16 @@ export async function logCallOutcome(input: {
   if (csErr) throw new Error(csErr.message);
 
   if (data.outcome === "connected") {
+    await recordStageAssignment(lead.id, "round_1", assignedKam!, u.email);
     await transitionLead(lead.id, "round_1_pending", assignedKam!, u.email);
   } else if (data.outcome === "junk" || data.outcome === "not_interested") {
-    await transitionLead(lead.id, data.outcome, lead.current_owner_email, u.email);
+    await transitionLead(lead.id, data.outcome, lead.current_owner_email ?? u.email, u.email);
   } else if (data.attempt_number >= 3) {
     // 3rd RNR/Reconnect — no attempts remain. Previously this just left the
     // lead stuck in calling_pending forever with no terminal marker; now it
     // gets a real terminal stage so it (a) stops showing as pending anywhere
     // and (b) becomes eligible for dedup reuse after the cooldown period.
-    await transitionLead(lead.id, "terminated", lead.current_owner_email, u.email);
+    await transitionLead(lead.id, "terminated", lead.current_owner_email ?? u.email, u.email);
   }
 
   return { ok: true };
@@ -221,6 +226,7 @@ export async function submitRound(input: {
   round_number: number;
   grades: Array<{ question_id: string; question_text_used: string; grade: number }>;
   remarks?: string | null;
+  next_owner_email?: string | null;
 }) {
   const data = z
     .object({
@@ -237,6 +243,7 @@ export async function submitRound(input: {
         .min(1)
         .max(200),
       remarks: z.string().max(2000).nullish(),
+      next_owner_email: z.string().email().max(255).nullish(),
     })
     .parse(input);
 
@@ -293,7 +300,7 @@ export async function submitRound(input: {
       .update({ passed: false, next_owner_email: null })
       .eq("lead_id", lead.id)
       .eq("round_number", data.round_number);
-    await transitionLead(lead.id, "failed", lead.current_owner_email, u.email, {
+    await transitionLead(lead.id, "failed", lead.current_owner_email ?? u.email, u.email, {
       verdict: "failed",
       round_number: data.round_number,
       total_score: total,
@@ -303,13 +310,16 @@ export async function submitRound(input: {
 
   if (!isLastRound) {
     const nextStageKey = `round_${data.round_number + 1}`;
-    const target = await assignedFor(lead.id, nextStageKey);
-    if (!target) throw new Error(`Round ${data.round_number + 1} taker not assigned yet — contact your admin`);
+    if (!data.next_owner_email) throw new Error(`Select who takes Round ${data.round_number + 1} before submitting`);
+    const target = data.next_owner_email.toLowerCase();
+    const nextPool = await poolMembers(nextStageKey);
+    if (!nextPool.includes(target)) throw new Error(`Selected person is not in the Round ${data.round_number + 1} pool`);
     await supabaseAdmin
       .from("interview_rounds")
       .update({ passed: true, next_owner_email: target })
       .eq("lead_id", lead.id)
       .eq("round_number", data.round_number);
+    await recordStageAssignment(lead.id, nextStageKey, target, u.email);
     await transitionLead(lead.id, `${nextStageKey}_pending`, target, u.email, {
       round_number: data.round_number,
       total_score: total,
@@ -342,12 +352,15 @@ export async function submitRound(input: {
     .eq("round_number", data.round_number);
 
   if (passed) {
-    const target = await assignedFor(lead.id, "expert_creation");
-    if (!target) throw new Error("Expert Creation agent not assigned yet — contact your admin");
+    if (!data.next_owner_email) throw new Error("Select who creates the expert profile before submitting");
+    const target = data.next_owner_email.toLowerCase();
+    const creationPool = await poolMembers("expert_creation");
+    if (!creationPool.includes(target)) throw new Error("Selected person is not in the Expert Creation pool");
+    await recordStageAssignment(lead.id, "expert_creation", target, u.email);
     await transitionLead(lead.id, "profile_creation_pending", target, u.email, { verdict: "passed", total_score: total });
     return { ok: true, total_score: total, verdict: "passed" as const };
   } else {
-    await transitionLead(lead.id, "failed", lead.current_owner_email, u.email, { verdict: "failed", total_score: total });
+    await transitionLead(lead.id, "failed", lead.current_owner_email ?? u.email, u.email, { verdict: "failed", total_score: total });
     return { ok: true, total_score: total, verdict: "failed" as const };
   }
 }
@@ -367,7 +380,7 @@ export async function linkExpertProfile(input: { lead_id: string; expert_id: str
     { onConflict: "lead_id" },
   );
   if (error) throw new Error(error.message);
-  await transitionLead(lead.id, "profile_created", lead.current_owner_email, u.email, { expert_id: data.expert_id });
+  await transitionLead(lead.id, "profile_created", lead.current_owner_email ?? u.email, u.email, { expert_id: data.expert_id });
   return { ok: true };
 }
 
@@ -403,7 +416,13 @@ export async function resolvePriority(source: string, override?: number | null):
   return srcCfg?.is_active ? srcCfg.priority_score : 99;
 }
 
-/** Shared insert path for addLead / bulkAddLeads / forceAllowDuplicate. Contact must already be normalized. */
+/**
+ * Shared insert path for addLead / bulkAddLeads / forceAllowDuplicate.
+ * Contact must already be normalized. `assigned_telecaller_email` is
+ * optional — admin can assign a telecaller later from Admin > Allotment
+ * instead of at intake time; the lead just sits in the Unassigned tab
+ * until then.
+ */
 export async function insertLeadRow(input: {
   name: string;
   contact: string;
@@ -413,10 +432,11 @@ export async function insertLeadRow(input: {
   source: string;
   priority: number;
   lead_date: string;
-  assigned_telecaller_email: string;
+  assigned_telecaller_email?: string | null;
   performedBy: string;
 }) {
   await requireUser();
+  const telecaller = input.assigned_telecaller_email || null;
   const lead_id = `REF-${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
   const { data: inserted, error } = await supabaseAdmin
     .from("leads")
@@ -429,9 +449,9 @@ export async function insertLeadRow(input: {
       language: input.language ?? null,
       source: input.source.trim(),
       priority: input.priority,
-      assigned_to_email: input.assigned_telecaller_email,
+      assigned_to_email: telecaller,
       current_stage: "calling_pending",
-      current_owner_email: input.assigned_telecaller_email,
+      current_owner_email: telecaller,
       lead_date: input.lead_date,
     })
     .select("id, lead_id")
@@ -442,11 +462,7 @@ export async function insertLeadRow(input: {
     priority: input.priority,
     manual: true,
   });
-  // Auto-allotment: if the admin has configured a default chain (Admin >
-  // Allotment > Default Chain), apply it immediately so the lead doesn't sit
-  // unassigned. Admins can still override any stage for this lead later from
-  // the Unassigned/Assigned tabs — that upsert simply replaces this row.
-  await applyDefaultChain(inserted.id);
+  if (telecaller) await recordStageAssignment(inserted.id, "calling", telecaller, input.performedBy);
   return inserted;
 }
 
@@ -466,7 +482,7 @@ export async function addLead(input: {
   source: string;
   priority?: number | null;
   lead_date?: string | null;
-  assigned_telecaller_email: string;
+  assigned_telecaller_email?: string | null;
 }) {
   const data = z
     .object({
@@ -478,7 +494,7 @@ export async function addLead(input: {
       source: z.string().min(1).max(200),
       priority: z.number().int().min(1).max(99).nullish(),
       lead_date: z.string().nullish(),
-      assigned_telecaller_email: z.string().email().max(255),
+      assigned_telecaller_email: z.string().email().max(255).nullish(),
     })
     .parse(input);
 
@@ -500,9 +516,14 @@ export async function addLead(input: {
     return { ok: false as const, duplicate: true as const, matched_lead: dedup.match!, reason: dedup.reason };
   }
 
-  const telecaller = data.assigned_telecaller_email.toLowerCase();
-  const callingPool = await poolMembers("calling");
-  if (!callingPool.includes(telecaller)) throw new Error("Selected telecaller is not in the calling pool");
+  // Telecaller is optional now — leaving it blank drops the lead into the
+  // Unassigned tab on Admin > Allotment for later assignment.
+  let telecaller: string | null = null;
+  if (data.assigned_telecaller_email) {
+    telecaller = data.assigned_telecaller_email.toLowerCase();
+    const callingPool = await poolMembers("calling");
+    if (!callingPool.includes(telecaller)) throw new Error("Selected telecaller is not in the calling pool");
+  }
 
   const priority = await resolvePriority(data.source, data.priority);
   const inserted = await insertLeadRow({
@@ -540,20 +561,25 @@ export async function bulkAddLeads(input: {
     source: string;
     lead_date?: string | null;
   }>;
-  assigned_telecaller_email: string;
+  assigned_telecaller_email?: string | null;
 }) {
   const data = z
     .object({
       rows: z.array(BulkRowSchema).min(1).max(1000),
-      assigned_telecaller_email: z.string().email().max(255),
+      assigned_telecaller_email: z.string().email().max(255).nullish(),
     })
     .parse(input);
 
   const u = await requireRole(INTAKE_ROLES);
 
-  const telecaller = data.assigned_telecaller_email.toLowerCase();
-  const callingPool = await poolMembers("calling");
-  if (!callingPool.includes(telecaller)) throw new Error("Selected telecaller is not in the calling pool");
+  // Optional — leaving it blank drops every row into the Unassigned tab for
+  // admin to allot afterwards, same as the manual Add Lead form.
+  let telecaller: string | null = null;
+  if (data.assigned_telecaller_email) {
+    telecaller = data.assigned_telecaller_email.toLowerCase();
+    const callingPool = await poolMembers("calling");
+    if (!callingPool.includes(telecaller)) throw new Error("Selected telecaller is not in the calling pool");
+  }
 
   let added = 0;
   const duplicates: Array<{

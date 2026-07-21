@@ -7,11 +7,13 @@ import { toast } from "sonner";
 import { ChevronLeft, Check } from "lucide-react";
 import {
   getLead,
+  getPool,
   logCallOutcome,
   startRound,
   submitRound,
   linkExpertProfile,
 } from "@/lib/actions/leads-actions";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { EmptyState } from "@/components/empty-state";
 import { StatusPill, stageToPill, type StatusKind } from "@/components/status-badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -220,8 +222,8 @@ function LeadTimeline({ data }: { data: LeadData }) {
       details: (
         <div className="space-y-1 text-sm text-muted-foreground">
           <div>
-            {state === "future" ? "Pre-assigned to" : "Conducted by"}:{" "}
-            <span className="font-medium text-foreground">{round?.conducted_by ?? assignedTo ?? "Not assigned yet"}</span>
+            Conducted by:{" "}
+            <span className="font-medium text-foreground">{round?.conducted_by ?? assignedTo ?? "Not started yet"}</span>
           </div>
           {round?.total_score != null && <div>Score: <span className="font-medium text-foreground">{round.total_score}</span></div>}
           {round?.remarks && <div>Notes: {round.remarks}</div>}
@@ -262,8 +264,8 @@ function LeadTimeline({ data }: { data: LeadData }) {
     details: (
       <div className="space-y-1 text-sm text-muted-foreground">
         <div>
-          {creationState === "future" ? "Pre-assigned to" : "Assigned to"}:{" "}
-          <span className="font-medium text-foreground">{profile?.linked_by ?? assignedCreation ?? "Not assigned yet"}</span>
+          Assigned to:{" "}
+          <span className="font-medium text-foreground">{profile?.linked_by ?? assignedCreation ?? "Not started yet"}</span>
         </div>
         {profile && <div>Expert ID: <span className="font-mono text-foreground">{profile.expert_id}</span></div>}
       </div>
@@ -355,8 +357,8 @@ const CALLING_OPTIONS = [
 ] as const;
 
 function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => void }) {
-  const { lead, attempts, assignments } = data;
-  const round1Assignee = assignments.find((a) => a.stage === "round_1")?.assigned_email ?? null;
+  const { lead, attempts } = data;
+  const round1PoolQ = useQuery({ queryKey: ["pool", "round_1"], queryFn: () => getPool({ stage: "round_1" }), staleTime: 5 * 60_000 });
 
   const sorted = [...attempts].sort((a, b) => a.attempt_number - b.attempt_number);
   const last = sorted[sorted.length - 1] as ((typeof sorted)[number] & { outcome?: string | null }) | undefined;
@@ -366,6 +368,7 @@ function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => 
 
   const [outcome, setOutcome] = React.useState<string | null>(null);
   const [remarks, setRemarks] = React.useState("");
+  const [nextOwner, setNextOwner] = React.useState("");
   const [busy, setBusy] = React.useState(false);
 
   if (nextAttempt == null) {
@@ -379,6 +382,7 @@ function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => 
   }
 
   const remarksRequired = outcome === "junk" || outcome === "not_interested";
+  const round1Pool = round1PoolQ.data?.members ?? [];
 
   async function save() {
     if (!outcome) {
@@ -389,8 +393,8 @@ function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => 
       toast.warning("Remarks are required for this outcome.");
       return;
     }
-    if (outcome === "connected" && !round1Assignee) {
-      toast.warning("Round 1 taker not assigned — contact admin.");
+    if (outcome === "connected" && !nextOwner) {
+      toast.warning("Select who takes Round 1 before submitting.");
       return;
     }
     setBusy(true);
@@ -400,10 +404,12 @@ function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => 
         attempt_number: nextAttempt!,
         outcome: outcome as "connected" | "rnr" | "reconnect" | "junk" | "not_interested",
         remarks: remarks || null,
+        next_owner_email: outcome === "connected" ? nextOwner : null,
       });
-      toast.success(outcome === "connected" ? `Lead passed to ${round1Assignee} for Round 1.` : "Attempt saved.");
+      toast.success(outcome === "connected" ? `Lead passed to ${nextOwner} for Round 1.` : "Attempt saved.");
       setOutcome(null);
       setRemarks("");
+      setNextOwner("");
       onChanged();
     } catch (e) {
       toast.error("Something went wrong.", { description: (e as Error).message });
@@ -412,8 +418,7 @@ function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => 
     }
   }
 
-  const connectedBlocked = outcome === "connected" && !round1Assignee;
-  const submitDisabled = busy || !outcome || (remarksRequired && !remarks.trim()) || connectedBlocked;
+  const submitDisabled = busy || !outcome || (remarksRequired && !remarks.trim()) || (outcome === "connected" && !nextOwner);
 
   return (
     <Card>
@@ -441,13 +446,18 @@ function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => 
         </div>
 
         {outcome === "connected" && (
-          <p className={`mt-5 text-sm ${round1Assignee ? "text-muted-foreground" : "text-destructive"}`}>
-            {round1Assignee ? (
-              <>This lead will be passed to <span className="font-medium text-foreground">{round1Assignee}</span> for Round 1.</>
-            ) : (
-              "Round 1 taker not assigned — contact admin."
+          <div className="mt-5 space-y-1.5">
+            <Label>Who takes Round 1?</Label>
+            <Select value={nextOwner} onValueChange={setNextOwner}>
+              <SelectTrigger><SelectValue placeholder="Select person" /></SelectTrigger>
+              <SelectContent>
+                {round1Pool.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            {round1Pool.length === 0 && (
+              <p className="text-xs text-destructive">No one is in the Round 1 pool yet — contact admin.</p>
             )}
-          </p>
+          </div>
         )}
 
         {outcome && (
@@ -470,16 +480,18 @@ function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => 
 /* ===================== ROUNDS ===================== */
 
 function RoundActions({ data, round, onChanged }: { data: LeadData; round: number; onChanged: () => void }) {
-  const { lead, assignments } = data;
+  const { lead } = data;
   const startQ = useQuery({ queryKey: ["round-questions", lead.id, round], queryFn: () => startRound({ lead_id: lead.id, round_number: round }) });
   const numRounds = data.cfg.num_rounds;
   const isLastRound = round >= numRounds;
   const nextStageKey = isLastRound ? "expert_creation" : `round_${round + 1}`;
   const nextStageLabel = isLastRound ? "Expert Creation" : `Round ${round + 1}`;
-  const nextAssignee = assignments.find((a) => a.stage === nextStageKey)?.assigned_email ?? null;
+  const nextPoolQ = useQuery({ queryKey: ["pool", nextStageKey], queryFn: () => getPool({ stage: nextStageKey }), staleTime: 5 * 60_000 });
+  const nextPool = nextPoolQ.data?.members ?? [];
 
   const [grades, setGrades] = React.useState<Record<string, number>>({});
   const [remarks, setRemarks] = React.useState("");
+  const [nextOwner, setNextOwner] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [verdict, setVerdict] = React.useState<{ verdict: string | null; total: number } | null>(null);
 
@@ -493,6 +505,10 @@ function RoundActions({ data, round, onChanged }: { data: LeadData; round: numbe
       toast.warning("Grade every question before submitting.");
       return;
     }
+    if (!nextOwner) {
+      toast.warning(`Select who takes ${nextStageLabel} before submitting.`);
+      return;
+    }
     setBusy(true);
     try {
       const r = await submitRound({
@@ -500,6 +516,7 @@ function RoundActions({ data, round, onChanged }: { data: LeadData; round: numbe
         round_number: round,
         grades: questions.map((q) => ({ question_id: q.question_id, question_text_used: q.question_text, grade: grades[q.question_id] ?? 0 })),
         remarks: remarks || null,
+        next_owner_email: nextOwner,
       });
       setVerdict({ verdict: r.verdict ?? null, total: r.total_score ?? 0 });
       if (r.verdict === "passed") toast.success(`Round ${round} passed. Moving to ${nextStageLabel}.`);
@@ -527,7 +544,7 @@ function RoundActions({ data, round, onChanged }: { data: LeadData; round: numbe
           </p>
           {passed && (
             <p className="mt-2 text-sm text-muted-foreground">
-              Lead moving to <span className="font-medium text-foreground">{nextAssignee ?? "—"}</span> for {nextStageLabel}.
+              Lead moving to <span className="font-medium text-foreground">{nextOwner}</span> for {nextStageLabel}.
             </p>
           )}
         </CardContent>
@@ -586,14 +603,16 @@ function RoundActions({ data, round, onChanged }: { data: LeadData; round: numbe
           <Textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={3} />
         </div>
 
-        <div className="mt-6 rounded-md bg-muted px-4 py-3">
-          <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Next (if they pass)</div>
-          {nextAssignee ? (
-            <p className="mt-1 text-sm text-foreground">
-              {nextAssignee} <span className="text-muted-foreground">({nextStageLabel})</span>
-            </p>
-          ) : (
-            <p className="mt-1 text-sm text-destructive">{nextStageLabel} taker not assigned yet — contact your admin.</p>
+        <div className="mt-6 space-y-1.5">
+          <Label>Who takes {nextStageLabel} if they pass?</Label>
+          <Select value={nextOwner} onValueChange={setNextOwner}>
+            <SelectTrigger><SelectValue placeholder="Select person" /></SelectTrigger>
+            <SelectContent>
+              {nextPool.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          {nextPool.length === 0 && (
+            <p className="text-xs text-destructive">No one is in the {nextStageLabel} pool yet — contact admin.</p>
           )}
         </div>
 
@@ -601,7 +620,7 @@ function RoundActions({ data, round, onChanged }: { data: LeadData; round: numbe
           <div className="mt-6 text-xs text-muted-foreground">{graded} of {questions.length} questions graded</div>
         )}
 
-        <Button onClick={submit} disabled={busy || !allGraded} className="mt-4 w-full">
+        <Button onClick={submit} disabled={busy || !allGraded || !nextOwner} className="mt-4 w-full">
           {busy ? "Submitting…" : `Submit Round ${round}`}
         </Button>
       </CardContent>

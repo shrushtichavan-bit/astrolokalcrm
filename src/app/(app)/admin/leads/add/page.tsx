@@ -97,8 +97,8 @@ function ManualAddTab() {
   }
 
   async function submit() {
-    if (!name.trim() || !contact.trim() || !source || !telecaller) {
-      toast.warning("Name, contact, source, and telecaller are all required.");
+    if (!name.trim() || !contact.trim() || !source) {
+      toast.warning("Name, contact, and source are required.");
       return;
     }
     setBusy(true);
@@ -110,14 +110,14 @@ function ManualAddTab() {
         source,
         priority: priority ? parseInt(priority, 10) : null,
         lead_date: leadDate || null,
-        assigned_telecaller_email: telecaller,
+        assigned_telecaller_email: telecaller || null,
       });
       if (!r.ok) {
         toast.error("This contact number already exists.", { description: `Matches existing lead ${r.matched_lead.lead_id} (${r.matched_lead.name}).` });
         setDupWarning(r.matched_lead);
         return;
       }
-      toast.success(`Lead ${r.lead.lead_id} created and assigned to ${telecaller}.`);
+      toast.success(telecaller ? `Lead ${r.lead.lead_id} created and assigned to ${telecaller}.` : `Lead ${r.lead.lead_id} created — assign a telecaller from Admin > Allotment.`);
       setResult({ lead_id: r.lead.lead_id, id: r.lead.id });
       reset();
       qc.invalidateQueries({ queryKey: ["my-leads"] });
@@ -163,9 +163,9 @@ function ManualAddTab() {
           <Input type="date" value={leadDate} onChange={(e) => setLeadDate(e.target.value)} />
         </div>
         <div>
-          <Label>Assigned Telecaller</Label>
+          <Label>Assigned Telecaller (optional — leave blank to assign later from Allotment)</Label>
           <Select value={telecaller} onValueChange={setTelecaller}>
-            <SelectTrigger><SelectValue placeholder="Select telecaller" /></SelectTrigger>
+            <SelectTrigger><SelectValue placeholder="No telecaller yet" /></SelectTrigger>
             <SelectContent>
               {(poolQ.data?.members ?? []).map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
             </SelectContent>
@@ -235,10 +235,6 @@ function BulkUploadTab() {
   }
 
   async function upload() {
-    if (!telecaller) {
-      toast.warning("Select a telecaller to assign this batch to.");
-      return;
-    }
     if (rows.length === 0) {
       toast.warning("Upload a CSV file with at least one row first.");
       return;
@@ -246,7 +242,7 @@ function BulkUploadTab() {
     setBusy(true);
     setResult(null);
     try {
-      const r = await bulkAddLeads({ rows, assigned_telecaller_email: telecaller });
+      const r = await bulkAddLeads({ rows, assigned_telecaller_email: telecaller || null });
       setResult(r);
       toast.success(`${r.added} lead${r.added === 1 ? "" : "s"} added, ${r.duplicates.length} duplicate${r.duplicates.length === 1 ? "" : "s"} skipped, ${r.errors.length} error${r.errors.length === 1 ? "" : "s"}.`);
       qc.invalidateQueries({ queryKey: ["my-leads"] });
@@ -275,9 +271,9 @@ function BulkUploadTab() {
         </div>
 
         <div>
-          <Label>Assigned Telecaller (applies to the whole batch)</Label>
+          <Label>Assigned Telecaller (optional, applies to the whole batch — leave blank to assign later from Allotment)</Label>
           <Select value={telecaller} onValueChange={setTelecaller}>
-            <SelectTrigger><SelectValue placeholder="Select telecaller" /></SelectTrigger>
+            <SelectTrigger><SelectValue placeholder="No telecaller yet" /></SelectTrigger>
             <SelectContent>
               {(poolQ.data?.members ?? []).map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
             </SelectContent>

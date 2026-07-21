@@ -51,7 +51,7 @@ const ADMIN_SECONDARY: NavItem[] = [
   { href: "/admin/people", label: "People", icon: Users2 },
   { href: "/admin/duplicates", label: "Duplicates", icon: Copy },
 ];
-const ADMIN_SYNC: NavItem[] = [{ href: "/sync", label: "Sync", icon: RefreshCw }];
+const SYNC_ITEM: NavItem = { href: "/sync", label: "Sync", icon: RefreshCw };
 
 const NON_ADMIN: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -96,10 +96,14 @@ function SidebarNav({ role, onNavigate }: { role: string; onNavigate?: () => voi
       {ADMIN_SECONDARY.map((item) => (
         <NavLink key={item.href} item={item} onNavigate={onNavigate} />
       ))}
-      <div className="my-2 h-px bg-border" />
-      {ADMIN_SYNC.map((item) => (
-        <NavLink key={item.href} item={item} onNavigate={onNavigate} />
-      ))}
+    </nav>
+  );
+}
+
+function SidebarSync({ onNavigate }: { onNavigate?: () => void }) {
+  return (
+    <nav className="border-t border-border px-3 py-2">
+      <NavLink item={SYNC_ITEM} onNavigate={onNavigate} />
     </nav>
   );
 }
@@ -162,15 +166,17 @@ export function AppShell({ user, children }: { user: ShellUser; children: React.
         <div className="flex-1 overflow-y-auto px-3 py-2">
           <SidebarNav role={user.role} />
         </div>
+        <SidebarSync />
       </aside>
 
       {/* Mobile drawer */}
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-        <SheetContent side="left" className="w-72 p-0">
+        <SheetContent side="left" className="flex w-72 flex-col p-0">
           <SidebarLogo />
-          <div className="px-3 py-2">
+          <div className="flex-1 overflow-y-auto px-3 py-2">
             <SidebarNav role={user.role} onNavigate={() => setMobileOpen(false)} />
           </div>
+          <SidebarSync onNavigate={() => setMobileOpen(false)} />
         </SheetContent>
       </Sheet>
 
