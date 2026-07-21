@@ -1,0 +1,663 @@
+"use client";
+
+import * as React from "react";
+import Link from "next/link";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { ChevronLeft, Check } from "lucide-react";
+import {
+  getLead,
+  logCallOutcome,
+  startRound,
+  submitRound,
+  linkExpertProfile,
+} from "@/lib/actions/leads-actions";
+import { EmptyState } from "@/components/empty-state";
+import { StatusPill, stageToPill, type StatusKind } from "@/components/status-badge";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+
+type LeadData = Awaited<ReturnType<typeof getLead>>;
+
+function formatContact(c: string): string {
+  if (!c) return "";
+  const digits = c.replace(/\D/g, "");
+  return digits.length === 10 ? `${digits.slice(0, 5)} ${digits.slice(5)}` : c;
+}
+function fmtDateTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+const OUTCOME_LABELS: Record<string, string> = {
+  connected: "Connected",
+  rnr: "RNR",
+  reconnect: "Reconnect",
+  junk: "Junk",
+  not_interested: "Not Interested",
+};
+
+export function LeadDetailClient({ id, userEmail }: { id: string; userEmail: string }) {
+  const qc = useQueryClient();
+  const leadQ = useQuery({ queryKey: ["lead", id], queryFn: () => getLead({ id }) });
+
+  function refresh() {
+    qc.invalidateQueries({ queryKey: ["lead", id] });
+    qc.invalidateQueries({ queryKey: ["my-leads"] });
+  }
+
+  if (leadQ.isLoading) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-32 w-full" />
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_380px]">
+          <Skeleton className="h-96 w-full" />
+          <Skeleton className="h-96 w-full" />
+        </div>
+      </div>
+    );
+  }
+
+  const errMsg = leadQ.error ? (leadQ.error as Error).message : null;
+  if (errMsg) {
+    const forbidden = errMsg.toLowerCase().includes("forbidden") || errMsg.toLowerCase().includes("not your lead");
+    return (
+      <EmptyState
+        title={forbidden ? "This lead is no longer assigned to you" : "Couldn't load this lead"}
+        description={forbidden ? "It may have moved to another stage or owner." : errMsg}
+        ctaLabel="Back to dashboard"
+        ctaHref="/dashboard"
+      />
+    );
+  }
+
+  const data = leadQ.data!;
+  const pill = stageToPill(data.lead.current_stage);
+
+  return (
+    <div>
+      <Link href="/dashboard" className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+        <ChevronLeft className="h-4 w-4" /> Dashboard
+      </Link>
+
+      <Card className="mb-4">
+        <CardContent className="flex flex-wrap items-start justify-between gap-4 p-6">
+          <div>
+            <h1 className="text-xl font-bold tracking-tight text-foreground">{data.lead.name}</h1>
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+              <span className="tabular-nums">{formatContact(data.lead.contact)}</span>
+              <span>·</span>
+              <span>{data.lead.source ?? "Direct"}</span>
+              {data.lead.lead_date && (
+                <>
+                  <span>·</span>
+                  <span>Lead date {data.lead.lead_date}</span>
+                </>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Badge variant={data.lead.priority <= 2 ? "default" : "secondary"}>Priority {data.lead.priority}</Badge>
+            <StatusPill kind={pill.kind} label={pill.label} />
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_380px]">
+        <LeadTimeline data={data} />
+        <ActionsPanel data={data} userEmail={userEmail} onChanged={refresh} />
+      </div>
+    </div>
+  );
+}
+
+/* ===================== TIMELINE ===================== */
+
+type TimelineState = "done" | "current" | "future";
+type TimelineItem = {
+  id: string;
+  title: string;
+  subtitle: string;
+  state: TimelineState;
+  pill: StatusKind;
+  pillLabel: string;
+  assignedTo?: string | null;
+  details?: React.ReactNode;
+};
+
+function LeadTimeline({ data }: { data: LeadData }) {
+  const { lead, attempts, rounds, profile, assignments } = data;
+  const [openId, setOpenId] = React.useState<string | null>(null);
+  const numRounds = data.cfg.num_rounds;
+  const assignedByStage = new Map((assignments ?? []).map((a) => [a.stage, a.assigned_email]));
+
+  const items: TimelineItem[] = [];
+
+  items.push({
+    id: "created",
+    title: "Lead Created",
+    subtitle: lead.lead_date ?? fmtDateTime(lead.created_at),
+    state: "done",
+    pill: "active",
+    pillLabel: "Created",
+    details: (
+      <div className="space-y-1 text-sm text-muted-foreground">
+        <div>Source: <span className="font-medium text-foreground">{lead.source ?? "Direct"}</span></div>
+        <div>Priority: <span className="font-medium text-foreground">{lead.priority}</span></div>
+      </div>
+    ),
+  });
+
+  const sortedAttempts = [...attempts].sort((a, b) => a.attempt_number - b.attempt_number);
+  const lastAttempt = sortedAttempts[sortedAttempts.length - 1] as
+    | ((typeof sortedAttempts)[number] & { outcome?: string | null; remarks?: string | null })
+    | undefined;
+  const callingState: TimelineState = lead.current_stage === "calling_pending" ? "current" : "done";
+  const callingOutcome = lastAttempt ? (lastAttempt.outcome ?? (lastAttempt.connected ? "connected" : "rnr")) : null;
+  items.push({
+    id: "calling",
+    title: "Calling",
+    subtitle: lastAttempt ? fmtDateTime(lastAttempt.attempted_at) : "No attempts yet",
+    state: callingState,
+    pill: callingOutcome ? (callingOutcome as StatusKind) : "pending",
+    pillLabel: callingOutcome ? (OUTCOME_LABELS[callingOutcome] ?? callingOutcome) : "Pending",
+    assignedTo: assignedByStage.get("calling") ?? lead.assigned_to_email,
+    details: (
+      <div className="space-y-2 text-sm text-muted-foreground">
+        <div>Assigned to: <span className="font-medium text-foreground">{assignedByStage.get("calling") ?? lead.assigned_to_email}</span></div>
+        {sortedAttempts.length === 0 && <div>No attempts logged yet.</div>}
+        {sortedAttempts.map((a) => {
+          const o = (a as { outcome?: string | null }).outcome ?? (a.connected ? "connected" : "rnr");
+          return (
+            <div key={a.id} className="border-t border-border pt-2 first:border-t-0 first:pt-0">
+              <div>
+                Attempt {a.attempt_number}: <span className="font-medium text-foreground">{OUTCOME_LABELS[o] ?? o}</span>
+                {" · "}{fmtDateTime(a.attempted_at)}
+              </div>
+              {(a as { remarks?: string | null }).remarks && <div>Notes: {(a as { remarks?: string | null }).remarks}</div>}
+            </div>
+          );
+        })}
+      </div>
+    ),
+  });
+
+  for (let n = 1; n <= numRounds; n++) {
+    const round = rounds.find((r) => r.round_number === n);
+    const stageKey = `round_${n}`;
+    const assignedTo = assignedByStage.get(stageKey);
+    let state: TimelineState;
+    let pill: StatusKind;
+    let pillLabel: string;
+    if (round?.submitted_at) {
+      state = "done";
+      pill = round.passed === true ? "passed" : round.passed === false ? "failed" : "pending";
+      pillLabel = round.passed === true ? "Passed" : round.passed === false ? "Failed" : "Submitted";
+    } else if (lead.current_stage === `${stageKey}_pending`) {
+      state = "current";
+      pill = "pending";
+      pillLabel = "In progress";
+    } else {
+      state = "future";
+      pill = "neutral";
+      pillLabel = "Not started";
+    }
+    items.push({
+      id: stageKey,
+      title: `Round ${n}`,
+      subtitle: round?.submitted_at ? fmtDateTime(round.submitted_at) : "",
+      state,
+      pill,
+      pillLabel,
+      assignedTo: assignedTo ?? null,
+      details: (
+        <div className="space-y-1 text-sm text-muted-foreground">
+          <div>
+            {state === "future" ? "Pre-assigned to" : "Conducted by"}:{" "}
+            <span className="font-medium text-foreground">{round?.conducted_by ?? assignedTo ?? "Not assigned yet"}</span>
+          </div>
+          {round?.total_score != null && <div>Score: <span className="font-medium text-foreground">{round.total_score}</span></div>}
+          {round?.remarks && <div>Notes: {round.remarks}</div>}
+        </div>
+      ),
+    });
+  }
+
+  const assignedCreation = assignedByStage.get("expert_creation");
+  let creationState: TimelineState;
+  let creationPill: StatusKind;
+  let creationLabel: string;
+  if (lead.current_stage === "active") {
+    creationState = "done";
+    creationPill = "active";
+    creationLabel = "Active";
+  } else if (profile) {
+    creationState = "done";
+    creationPill = "inactive";
+    creationLabel = "Profile Created";
+  } else if (lead.current_stage === "profile_creation_pending") {
+    creationState = "current";
+    creationPill = "pending";
+    creationLabel = "In progress";
+  } else {
+    creationState = "future";
+    creationPill = "neutral";
+    creationLabel = "Not started";
+  }
+  items.push({
+    id: "expert_creation",
+    title: "Expert Creation",
+    subtitle: profile?.activated_at ? fmtDateTime(profile.activated_at) : "",
+    state: creationState,
+    pill: creationPill,
+    pillLabel: creationLabel,
+    assignedTo: assignedCreation ?? null,
+    details: (
+      <div className="space-y-1 text-sm text-muted-foreground">
+        <div>
+          {creationState === "future" ? "Pre-assigned to" : "Assigned to"}:{" "}
+          <span className="font-medium text-foreground">{profile?.linked_by ?? assignedCreation ?? "Not assigned yet"}</span>
+        </div>
+        {profile && <div>Expert ID: <span className="font-mono text-foreground">{profile.expert_id}</span></div>}
+      </div>
+    ),
+  });
+
+  return (
+    <div className="space-y-2">
+      <h2 className="mb-1 text-sm font-semibold text-foreground">Timeline</h2>
+      {items.map((it) => {
+        const open = openId === it.id || it.state === "current";
+        const future = it.state === "future";
+        return (
+          <Card key={it.id} className={`overflow-hidden ${it.state === "current" ? "border-primary" : ""} ${future ? "opacity-60" : ""}`}>
+            <button
+              type="button"
+              onClick={() => setOpenId(open && openId === it.id ? null : it.id)}
+              className="flex w-full items-center justify-between gap-3 px-5 py-3 text-left transition-colors hover:bg-accent/50"
+            >
+              <div className="flex items-center gap-3">
+                {it.state === "done" ? (
+                  <Check className="h-4 w-4 text-success" />
+                ) : it.state === "current" ? (
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-primary" />
+                ) : (
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-full border-2 border-muted-foreground/40" />
+                )}
+                <span className="text-sm font-medium text-foreground">{it.title}</span>
+                <StatusPill kind={it.pill} label={it.pillLabel} />
+              </div>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                {future && it.assignedTo && <span>Assigned to {it.assignedTo}</span>}
+                <span>{it.subtitle}</span>
+              </div>
+            </button>
+            {open && <div className="border-t border-border px-5 py-3">{it.details}</div>}
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ===================== ACTIONS PANEL ===================== */
+
+function ActionsPanel({ data, userEmail, onChanged }: { data: LeadData; userEmail: string; onChanged: () => void }) {
+  const stage = data.lead.current_stage;
+  const isOwner = data.lead.current_owner_email === userEmail;
+
+  if (!isOwner) {
+    const forLabel =
+      stage === "calling_pending"
+        ? "Calling"
+        : stage === "profile_creation_pending"
+          ? "Expert Profile Creation"
+          : stage.startsWith("round_") && stage.endsWith("_pending")
+            ? `Round ${stage.replace(/[^0-9]/g, "")}`
+            : stage;
+    return (
+      <Card>
+        <CardContent className="p-6">
+          <p className="text-base font-semibold text-foreground">Passed to {data.lead.current_owner_email}</p>
+          <p className="mt-2 text-sm text-muted-foreground">For {forLabel}</p>
+          <p className="mt-4 text-sm text-muted-foreground">Your work on this lead is complete.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (stage === "calling_pending") return <CallingActions data={data} onChanged={onChanged} />;
+  const roundMatch = stage.match(/^round_(\d+)_pending$/);
+  if (roundMatch) return <RoundActions data={data} round={parseInt(roundMatch[1], 10)} onChanged={onChanged} />;
+  if (stage === "profile_creation_pending") return <ProfileActions data={data} onChanged={onChanged} />;
+  return (
+    <Card>
+      <CardContent className="p-6 text-sm text-muted-foreground">Nothing to do here.</CardContent>
+    </Card>
+  );
+}
+
+/* ===================== CALLING ===================== */
+
+const CALLING_OPTIONS = [
+  { value: "connected", label: "Connected", desc: "I spoke to them." },
+  { value: "reconnect", label: "Reconnect", desc: "They asked to call back later." },
+  { value: "rnr", label: "RNR", desc: "Phone rang but no one answered." },
+  { value: "junk", label: "Junk", desc: "Wrong number or fake lead." },
+  { value: "not_interested", label: "Not Interested", desc: "They picked up but refused." },
+] as const;
+
+function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => void }) {
+  const { lead, attempts, assignments } = data;
+  const round1Assignee = assignments.find((a) => a.stage === "round_1")?.assigned_email ?? null;
+
+  const sorted = [...attempts].sort((a, b) => a.attempt_number - b.attempt_number);
+  const last = sorted[sorted.length - 1] as ((typeof sorted)[number] & { outcome?: string | null }) | undefined;
+  const lastOutcome = last ? (last.outcome ?? (last.connected ? "connected" : "rnr")) : null;
+  const terminal = lastOutcome ? ["connected", "junk", "not_interested"].includes(lastOutcome) : false;
+  const nextAttempt = !last ? 1 : terminal ? null : last.attempt_number >= 3 ? null : last.attempt_number + 1;
+
+  const [outcome, setOutcome] = React.useState<string | null>(null);
+  const [remarks, setRemarks] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+
+  if (nextAttempt == null) {
+    return (
+      <Card>
+        <CardContent className="p-6 text-sm text-muted-foreground">
+          {terminal ? "Lead is finalised — no more attempts needed." : "All 3 attempts logged."}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const remarksRequired = outcome === "junk" || outcome === "not_interested";
+
+  async function save() {
+    if (!outcome) {
+      toast.warning("Select an outcome before saving.");
+      return;
+    }
+    if (remarksRequired && !remarks.trim()) {
+      toast.warning("Remarks are required for this outcome.");
+      return;
+    }
+    if (outcome === "connected" && !round1Assignee) {
+      toast.warning("Round 1 taker not assigned yet — contact your admin.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await logCallOutcome({
+        lead_id: lead.id,
+        attempt_number: nextAttempt!,
+        outcome: outcome as "connected" | "rnr" | "reconnect" | "junk" | "not_interested",
+        remarks: remarks || null,
+      });
+      toast.success(outcome === "connected" ? `Lead passed to ${round1Assignee} for Round 1.` : "Attempt saved.");
+      setOutcome(null);
+      setRemarks("");
+      onChanged();
+    } catch (e) {
+      toast.error("Something went wrong.", { description: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardContent className="p-6">
+          <p className="text-base font-semibold text-foreground">Attempt {nextAttempt}</p>
+          <p className="mt-1 text-sm text-muted-foreground">What happened on the call?</p>
+
+          <div className="mt-5 space-y-2">
+            {CALLING_OPTIONS.map((opt) => {
+              const selected = outcome === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setOutcome(opt.value)}
+                  className={`block w-full rounded-md border px-4 py-3 text-left transition-colors ${
+                    selected ? "border-primary bg-primary/5" : "border-border bg-background hover:border-muted-foreground/40"
+                  }`}
+                >
+                  <div className="text-sm font-medium text-foreground">{opt.label}</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">{opt.desc}</div>
+                </button>
+              );
+            })}
+          </div>
+
+          {outcome && outcome !== "connected" && (
+            <div className="mt-5 space-y-1.5">
+              <Label>Notes {remarksRequired ? "(required)" : "(optional)"}</Label>
+              <Textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={3} placeholder={remarksRequired ? "Why? (required)" : "What happened?"} />
+            </div>
+          )}
+
+          {outcome && outcome !== "connected" && (
+            <Button onClick={save} disabled={busy || (remarksRequired && !remarks.trim())} className="mt-5 w-full">
+              {busy ? "Saving…" : "Save attempt"}
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+
+      {outcome === "connected" && (
+        <Card>
+          <CardContent className="p-6">
+            <p className="text-base font-semibold text-foreground">Next</p>
+            {round1Assignee ? (
+              <>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  This lead will be passed to <span className="font-medium text-foreground">{round1Assignee}</span> for Round 1.
+                </p>
+                <div className="mt-4 space-y-1.5">
+                  <Label>Notes (optional)</Label>
+                  <Textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={3} placeholder="What did they say?" />
+                </div>
+                <Button onClick={save} disabled={busy} className="mt-4 w-full">
+                  {busy ? "Passing…" : "Pass to Round 1"}
+                </Button>
+              </>
+            ) : (
+              <p className="mt-2 text-sm text-destructive">Round 1 taker not assigned yet — contact your admin.</p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+/* ===================== ROUNDS ===================== */
+
+function RoundActions({ data, round, onChanged }: { data: LeadData; round: number; onChanged: () => void }) {
+  const { lead, assignments } = data;
+  const startQ = useQuery({ queryKey: ["round-questions", lead.id, round], queryFn: () => startRound({ lead_id: lead.id, round_number: round }) });
+  const numRounds = data.cfg.num_rounds;
+  const isLastRound = round >= numRounds;
+  const nextStageKey = isLastRound ? "expert_creation" : `round_${round + 1}`;
+  const nextStageLabel = isLastRound ? "Expert Creation" : `Round ${round + 1}`;
+  const nextAssignee = assignments.find((a) => a.stage === nextStageKey)?.assigned_email ?? null;
+
+  const [grades, setGrades] = React.useState<Record<string, number>>({});
+  const [remarks, setRemarks] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [verdict, setVerdict] = React.useState<{ verdict: string | null; total: number } | null>(null);
+
+  const questions = startQ.data?.questions ?? [];
+  const graded = questions.filter((q) => grades[q.question_id] != null).length;
+  const allGraded = questions.length > 0 && graded === questions.length;
+  const total = questions.reduce((s, q) => s + (grades[q.question_id] ?? 0), 0);
+
+  async function submit() {
+    if (!allGraded) {
+      toast.warning("Grade every question before submitting.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await submitRound({
+        lead_id: lead.id,
+        round_number: round,
+        grades: questions.map((q) => ({ question_id: q.question_id, question_text_used: q.question_text, grade: grades[q.question_id] ?? 0 })),
+        remarks: remarks || null,
+      });
+      setVerdict({ verdict: r.verdict ?? null, total: r.total_score ?? 0 });
+      if (r.verdict === "passed") toast.success(`Round ${round} passed. Moving to ${nextStageLabel}.`);
+      else if (r.verdict === "failed") toast.error(`Round ${round} not passed.`);
+      else toast.success(`Round ${round} saved.`);
+      onChanged();
+    } catch (e) {
+      toast.error("Something went wrong.", { description: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (verdict) {
+    const passed = verdict.verdict === "passed";
+    return (
+      <Card>
+        <CardContent className="p-6">
+          <StatusPill kind={passed ? "passed" : "failed"} label={passed ? "Passed" : "Not passed"} />
+          <h2 className="mt-3 text-lg font-semibold tracking-tight text-foreground">
+            Round {round} {passed ? "passed" : "not passed"}
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Total score: <span className="font-medium text-foreground">{verdict.total}</span>
+          </p>
+          {passed && (
+            <p className="mt-2 text-sm text-muted-foreground">
+              Lead moving to <span className="font-medium text-foreground">{nextAssignee ?? "—"}</span> for {nextStageLabel}.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardContent className="p-6">
+        <p className="text-base font-semibold text-foreground">Round {round}</p>
+        <p className="mt-1 text-sm text-muted-foreground">Grade each question from 0 (poor) to 5 (excellent).</p>
+
+        {startQ.isLoading ? (
+          <div className="mt-5 space-y-3">
+            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-16 w-full" />
+          </div>
+        ) : (
+          <div className="mt-6 space-y-6">
+            {questions.map((q, i) => (
+              <div key={q.question_id}>
+                <div className="text-xs font-medium text-muted-foreground">Question {i + 1} of {questions.length}</div>
+                <p className="mt-1 text-sm text-foreground">{q.question_text}</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {[0, 1, 2, 3, 4, 5].map((n) => {
+                    const selected = grades[q.question_id] === n;
+                    return (
+                      <button
+                        key={n}
+                        type="button"
+                        onClick={() => setGrades({ ...grades, [q.question_id]: n })}
+                        className={`h-9 w-9 rounded-md border text-sm font-semibold transition-colors ${
+                          selected ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background text-muted-foreground hover:border-muted-foreground/40"
+                        }`}
+                      >
+                        {n}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {questions.length > 0 && (
+          <div className="mt-6 flex items-center justify-between rounded-md bg-muted px-3 py-2 text-sm">
+            <span className="text-muted-foreground">Running total</span>
+            <span className="font-semibold tabular-nums text-foreground">{total}</span>
+          </div>
+        )}
+
+        <div className="mt-6 space-y-1.5">
+          <Label>Notes (optional)</Label>
+          <Textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={3} />
+        </div>
+
+        <div className="mt-6 rounded-md bg-muted px-4 py-3">
+          <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Next (if they pass)</div>
+          {nextAssignee ? (
+            <p className="mt-1 text-sm text-foreground">
+              {nextAssignee} <span className="text-muted-foreground">({nextStageLabel})</span>
+            </p>
+          ) : (
+            <p className="mt-1 text-sm text-destructive">{nextStageLabel} taker not assigned yet — contact your admin.</p>
+          )}
+        </div>
+
+        {questions.length > 0 && (
+          <div className="mt-6 text-xs text-muted-foreground">{graded} of {questions.length} questions graded</div>
+        )}
+
+        <Button onClick={submit} disabled={busy || !allGraded} className="mt-4 w-full">
+          {busy ? "Submitting…" : `Submit Round ${round}`}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ===================== EXPERT CREATION ===================== */
+
+function ProfileActions({ data, onChanged }: { data: LeadData; onChanged: () => void }) {
+  const { lead } = data;
+  const [expertId, setExpertId] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+
+  async function submit() {
+    if (!expertId.trim()) {
+      toast.warning("Enter an expert ID first.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await linkExpertProfile({ lead_id: lead.id, expert_id: expertId.trim() });
+      toast.success("Expert profile linked.");
+      onChanged();
+    } catch (e) {
+      toast.error("Something went wrong.", { description: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardContent className="p-6">
+        <p className="text-base font-semibold text-foreground">Link the expert profile</p>
+        <p className="mt-1 text-sm text-muted-foreground">Create the expert profile in the AstroLokal app, then enter its ID below.</p>
+        <div className="mt-4 space-y-3">
+          <Input value={expertId} onChange={(e) => setExpertId(e.target.value)} placeholder="Expert ID" />
+          <Button disabled={busy || !expertId.trim()} onClick={submit} className="w-full">
+            {busy ? "Linking…" : "Link and mark profile created"}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}

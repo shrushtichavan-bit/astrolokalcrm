@@ -16,6 +16,16 @@ dist-ssr
 .nitro
 *.local
 
+# Next.js
+.next/
+next-env.d.ts
+*.tsbuildinfo
+
+# Env files — never commit secrets (service role key lives here)
+.env
+.env.*
+!.env.example
+
 # Wrangler / Cloudflare
 .wrangler/
 .dev.vars
