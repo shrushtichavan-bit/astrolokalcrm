@@ -412,71 +412,58 @@ function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => 
     }
   }
 
+  const connectedBlocked = outcome === "connected" && !round1Assignee;
+  const submitDisabled = busy || !outcome || (remarksRequired && !remarks.trim()) || connectedBlocked;
+
   return (
-    <div className="space-y-4">
-      <Card>
-        <CardContent className="p-6">
-          <p className="text-base font-semibold text-foreground">Attempt {nextAttempt}</p>
-          <p className="mt-1 text-sm text-muted-foreground">What happened on the call?</p>
+    <Card>
+      <CardContent className="p-6">
+        <p className="text-base font-semibold text-foreground">Attempt {nextAttempt}</p>
+        <p className="mt-1 text-sm text-muted-foreground">What happened on the call?</p>
 
-          <div className="mt-5 space-y-2">
-            {CALLING_OPTIONS.map((opt) => {
-              const selected = outcome === opt.value;
-              return (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => setOutcome(opt.value)}
-                  className={`block w-full rounded-md border px-4 py-3 text-left transition-colors ${
-                    selected ? "border-primary bg-primary/5" : "border-border bg-background hover:border-muted-foreground/40"
-                  }`}
-                >
-                  <div className="text-sm font-medium text-foreground">{opt.label}</div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">{opt.desc}</div>
-                </button>
-              );
-            })}
-          </div>
+        <div className="mt-5 space-y-2">
+          {CALLING_OPTIONS.map((opt) => {
+            const selected = outcome === opt.value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setOutcome(opt.value)}
+                className={`block w-full rounded-md border px-4 py-3 text-left transition-colors ${
+                  selected ? "border-primary bg-primary/5" : "border-border bg-background hover:border-muted-foreground/40"
+                }`}
+              >
+                <div className="text-sm font-medium text-foreground">{opt.label}</div>
+                <div className="mt-0.5 text-xs text-muted-foreground">{opt.desc}</div>
+              </button>
+            );
+          })}
+        </div>
 
-          {outcome && outcome !== "connected" && (
-            <div className="mt-5 space-y-1.5">
-              <Label>Notes {remarksRequired ? "(required)" : "(optional)"}</Label>
-              <Textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={3} placeholder={remarksRequired ? "Why? (required)" : "What happened?"} />
-            </div>
-          )}
-
-          {outcome && outcome !== "connected" && (
-            <Button onClick={save} disabled={busy || (remarksRequired && !remarks.trim())} className="mt-5 w-full">
-              {busy ? "Saving…" : "Save attempt"}
-            </Button>
-          )}
-        </CardContent>
-      </Card>
-
-      {outcome === "connected" && (
-        <Card>
-          <CardContent className="p-6">
-            <p className="text-base font-semibold text-foreground">Next</p>
+        {outcome === "connected" && (
+          <p className={`mt-5 text-sm ${round1Assignee ? "text-muted-foreground" : "text-destructive"}`}>
             {round1Assignee ? (
-              <>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  This lead will be passed to <span className="font-medium text-foreground">{round1Assignee}</span> for Round 1.
-                </p>
-                <div className="mt-4 space-y-1.5">
-                  <Label>Notes (optional)</Label>
-                  <Textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={3} placeholder="What did they say?" />
-                </div>
-                <Button onClick={save} disabled={busy} className="mt-4 w-full">
-                  {busy ? "Passing…" : "Pass to Round 1"}
-                </Button>
-              </>
+              <>This lead will be passed to <span className="font-medium text-foreground">{round1Assignee}</span> for Round 1.</>
             ) : (
-              <p className="mt-2 text-sm text-destructive">Round 1 taker not assigned — contact admin.</p>
+              "Round 1 taker not assigned — contact admin."
             )}
-          </CardContent>
-        </Card>
-      )}
-    </div>
+          </p>
+        )}
+
+        {outcome && (
+          <div className="mt-5 space-y-1.5">
+            <Label>Notes {remarksRequired ? "(required)" : "(optional)"}</Label>
+            <Textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={3} placeholder={remarksRequired ? "Why? (required)" : "What happened?"} />
+          </div>
+        )}
+
+        {outcome && (
+          <Button onClick={save} disabled={submitDisabled} className="mt-5 w-full">
+            {busy ? "Submitting…" : "Submit"}
+          </Button>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
