@@ -10,6 +10,8 @@ import {
   upsertQuestions,
   getStagePools,
   upsertStagePools,
+  getCrmSettings,
+  upsertCrmSettings,
 } from "@/lib/actions/config-actions";
 import { listUsers } from "@/lib/actions/team-actions";
 import { PageHeader } from "@/components/page-header";
@@ -42,10 +44,12 @@ export default function ConfigPage() {
           <TabsTrigger value="rounds">Round Config</TabsTrigger>
           <TabsTrigger value="questions">Questions</TabsTrigger>
           <TabsTrigger value="pools">Stage Pools</TabsTrigger>
+          <TabsTrigger value="dedup">Dedup Settings</TabsTrigger>
         </TabsList>
         <TabsContent value="rounds"><RoundConfigTab /></TabsContent>
         <TabsContent value="questions"><QuestionsTab /></TabsContent>
         <TabsContent value="pools"><StagePoolsTab /></TabsContent>
+        <TabsContent value="dedup"><DedupSettingsTab /></TabsContent>
       </Tabs>
     </div>
   );
@@ -234,6 +238,14 @@ function StagePoolsTab() {
       await upsertStagePools({ stage, eligible_emails: Array.from(selected) });
       toast.success(`${STAGE_LABELS[stage]} pool saved.`);
       qc.invalidateQueries({ queryKey: ["admin-stage-pools"] });
+      // BUG FIX: this used to only invalidate the Config page's own cache key.
+      // The Add Lead telecaller dropdown and the Allotment assign dialog both
+      // read this same data under a different key (["pool", stage]), so a
+      // save here never refreshed them — they kept showing whatever was
+      // cached from before, for up to their 5-10min staleTime. Invalidating
+      // the whole "pool" key family (not just the exact ["pool","calling"]
+      // tuple) catches every stage's dropdown in one go.
+      qc.invalidateQueries({ queryKey: ["pool"] });
     } catch (e) {
       toast.error("Something went wrong.", { description: (e as Error).message });
     } finally {
@@ -268,6 +280,54 @@ function StagePoolsTab() {
           </div>
         )}
         <Button onClick={save} disabled={busy}>{busy ? "Saving…" : `Save ${STAGE_LABELS[stage]} Pool`}</Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+function DedupSettingsTab() {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["admin-crm-settings"], queryFn: () => getCrmSettings() });
+  const [cooldownDays, setCooldownDays] = React.useState(60);
+  const [busy, setBusy] = React.useState(false);
+
+  React.useEffect(() => {
+    if (q.data) setCooldownDays(q.data.cooldown_days);
+  }, [q.data]);
+
+  async function save() {
+    setBusy(true);
+    try {
+      await upsertCrmSettings({ cooldown_days: cooldownDays });
+      toast.success("Dedup settings saved.");
+      qc.invalidateQueries({ queryKey: ["admin-crm-settings"] });
+    } catch (e) {
+      toast.error("Something went wrong.", { description: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (q.isLoading) return <Skeleton className="mt-4 h-40 w-full" />;
+
+  return (
+    <Card className="mt-4">
+      <CardContent className="space-y-4 p-4">
+        <div className="max-w-xs">
+          <Label className="text-xs">Cooldown (days)</Label>
+          <Input
+            type="number"
+            min={0}
+            value={cooldownDays}
+            onChange={(e) => setCooldownDays(parseInt(e.target.value, 10) || 0)}
+          />
+          <p className="mt-1 text-xs text-muted-foreground">
+            A closed lead (Junk / Not Interested / Failed Round / Terminated) can be re-added with the same contact
+            number once it has been closed for this many days. Leads still active in the pipeline are always blocked
+            regardless of this setting.
+          </p>
+        </div>
+        <Button onClick={save} disabled={busy}>{busy ? "Saving…" : "Save Dedup Settings"}</Button>
       </CardContent>
     </Card>
   );

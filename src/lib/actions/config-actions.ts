@@ -98,3 +98,21 @@ export async function upsertStagePools(input: { stage: string; eligible_emails: 
   }
   return { ok: true };
 }
+
+// ---------- Dedup settings ----------
+
+export async function getCrmSettings() {
+  await requireRole("admin");
+  const { data } = await supabaseAdmin.from("crm_settings").select("*").eq("id", 1).maybeSingle();
+  return { cooldown_days: data?.cooldown_days ?? 60 };
+}
+
+export async function upsertCrmSettings(input: { cooldown_days: number }) {
+  const { cooldown_days } = z.object({ cooldown_days: z.number().int().min(0).max(3650) }).parse(input);
+  await requireRole("admin");
+  const { error } = await supabaseAdmin
+    .from("crm_settings")
+    .upsert({ id: 1, cooldown_days, updated_at: new Date().toISOString() });
+  if (error) throw new Error(error.message);
+  return { ok: true };
+}

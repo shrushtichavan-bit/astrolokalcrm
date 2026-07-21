@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { UsersRound } from "lucide-react";
 import { listUsers, addUser, updateUser, deleteUser } from "@/lib/actions/team-actions";
+import { ROLE_LABELS, roleLabel } from "@/lib/roles";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { Card, CardContent } from "@/components/ui/card";
@@ -94,7 +95,7 @@ export default function TeamPage() {
                     <Label>Role</Label>
                     <Select value={editing.role} onValueChange={(v) => setEditing({ ...editing, role: v })}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>{ROLES.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
+                      <SelectContent>{ROLES.map((r) => <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>)}</SelectContent>
                     </Select>
                   </div>
                   <div>
@@ -130,7 +131,7 @@ export default function TeamPage() {
                   <TableRow key={u.id}>
                     <TableCell className="font-medium">{u.name}</TableCell>
                     <TableCell className="text-muted-foreground">{u.email}</TableCell>
-                    <TableCell className="capitalize">{u.role}</TableCell>
+                    <TableCell>{roleLabel(u.role)}</TableCell>
                     <TableCell className="text-right">
                       <Button size="sm" variant="outline" className="mr-2" onClick={() => openEdit(u)}>Edit</Button>
                       <Button size="sm" variant="outline" onClick={() => remove(u.id)}>Delete</Button>

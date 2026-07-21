@@ -36,12 +36,16 @@ export interface Database {
           lead_id: string;
           name: string;
           contact: string;
+          email: string | null;
+          city: string | null;
+          language: string | null;
           source: string | null;
           priority: number;
           assigned_to_email: string;
           current_stage: string;
           current_owner_email: string;
           lead_date: string | null;
+          closed_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -50,12 +54,16 @@ export interface Database {
           lead_id: string;
           name: string;
           contact: string;
+          email?: string | null;
+          city?: string | null;
+          language?: string | null;
           source?: string | null;
           priority?: number;
           assigned_to_email: string;
           current_stage?: string;
           current_owner_email: string;
           lead_date?: string | null;
+          closed_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -264,6 +272,11 @@ export interface Database {
           matched_lead_id: string | null;
           detected_at: string;
           detected_by: string;
+          payload: Json | null;
+          resolved: boolean;
+          resolved_at: string | null;
+          resolved_by: string | null;
+          resolved_lead_id: string | null;
         };
         Insert: {
           id?: string;
@@ -273,8 +286,19 @@ export interface Database {
           matched_lead_id?: string | null;
           detected_at?: string;
           detected_by: string;
+          payload?: Json | null;
+          resolved?: boolean;
+          resolved_at?: string | null;
+          resolved_by?: string | null;
+          resolved_lead_id?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["duplicate_log"]["Insert"]>;
+        Relationships: [];
+      };
+      crm_settings: {
+        Row: { id: number; cooldown_days: number; updated_at: string };
+        Insert: { id?: number; cooldown_days?: number; updated_at?: string };
+        Update: Partial<Database["public"]["Tables"]["crm_settings"]["Insert"]>;
         Relationships: [];
       };
     };

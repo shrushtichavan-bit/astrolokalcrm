@@ -3,7 +3,9 @@
 import { z } from "zod";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { requireRole } from "@/lib/auth";
-import { round1 } from "@/lib/helpers";
+import { round1, poolMembers } from "@/lib/helpers";
+import { insertLeadRow, resolvePriority } from "@/lib/actions/leads-actions";
+import { normalizeContact } from "@/lib/dedup";
 
 const FiltersSchema = z.object({
   from: z.string().nullish(),
@@ -645,4 +647,66 @@ export async function getDuplicateLog() {
   const { data, error } = await supabaseAdmin.from("duplicate_log").select("*").order("detected_at", { ascending: false }).limit(500);
   if (error) throw error;
   return { rows: data ?? [] };
+}
+
+/**
+ * Admin override for a blocked duplicate: creates the lead from the payload
+ * stored at detection time, bypassing the dedup check, and marks the log
+ * entry resolved so it's not offered again.
+ */
+export async function forceAllowDuplicate(input: { duplicate_log_id: string }) {
+  const { duplicate_log_id } = z.object({ duplicate_log_id: z.string().uuid() }).parse(input);
+  const u = await requireRole("admin");
+
+  const { data: entry, error } = await supabaseAdmin
+    .from("duplicate_log")
+    .select("*")
+    .eq("id", duplicate_log_id)
+    .maybeSingle();
+  if (error) throw error;
+  if (!entry) throw new Error("Duplicate log entry not found");
+  if (entry.resolved) throw new Error("This duplicate has already been resolved");
+  if (!entry.payload) throw new Error("No stored submission for this entry — it predates the override feature");
+
+  const payload = entry.payload as {
+    name: string;
+    contact: string;
+    email?: string | null;
+    city?: string | null;
+    language?: string | null;
+    source: string;
+    priority?: number | null;
+    lead_date?: string | null;
+    assigned_telecaller_email: string;
+  };
+
+  const normalized = normalizeContact(payload.contact);
+  if (!normalized) throw new Error("Stored contact number is invalid");
+
+  const telecaller = payload.assigned_telecaller_email.toLowerCase();
+  const callingPool = await poolMembers("calling");
+  if (!callingPool.includes(telecaller))
+    throw new Error(`Stored telecaller (${telecaller}) is no longer in the calling pool — reassign manually instead`);
+
+  const priority = await resolvePriority(payload.source, payload.priority ?? null);
+  const inserted = await insertLeadRow({
+    name: payload.name,
+    contact: normalized,
+    email: payload.email,
+    city: payload.city,
+    language: payload.language,
+    source: payload.source,
+    priority,
+    lead_date: payload.lead_date ?? new Date().toISOString().slice(0, 10),
+    assigned_telecaller_email: telecaller,
+    performedBy: u.email,
+  });
+
+  const { error: resolveErr } = await supabaseAdmin
+    .from("duplicate_log")
+    .update({ resolved: true, resolved_at: new Date().toISOString(), resolved_by: u.email, resolved_lead_id: inserted.id })
+    .eq("id", duplicate_log_id);
+  if (resolveErr) throw new Error(resolveErr.message);
+
+  return { ok: true, lead: inserted };
 }

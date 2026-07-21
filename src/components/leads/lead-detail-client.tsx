@@ -390,7 +390,7 @@ function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => 
       return;
     }
     if (outcome === "connected" && !round1Assignee) {
-      toast.warning("Round 1 taker not assigned yet — contact your admin.");
+      toast.warning("Round 1 taker not assigned — contact admin.");
       return;
     }
     setBusy(true);
@@ -471,7 +471,7 @@ function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => 
                 </Button>
               </>
             ) : (
-              <p className="mt-2 text-sm text-destructive">Round 1 taker not assigned yet — contact your admin.</p>
+              <p className="mt-2 text-sm text-destructive">Round 1 taker not assigned — contact admin.</p>
             )}
           </CardContent>
         </Card>

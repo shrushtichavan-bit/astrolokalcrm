@@ -10,6 +10,9 @@ export async function appendAudit(leadId: string, action: string, performedBy: s
   });
 }
 
+/** Stages that count as "closed" for dedup cooldown purposes — see [[dedup.ts]]. */
+export const TERMINAL_STAGES = ["failed", "junk", "not_interested", "terminated"] as const;
+
 export async function transitionLead(
   leadId: string,
   nextStage: string,
@@ -17,10 +20,17 @@ export async function transitionLead(
   performedBy: string,
   metadata?: unknown,
 ) {
-  const { error } = await supabaseAdmin
-    .from("leads")
-    .update({ current_stage: nextStage, current_owner_email: nextOwnerEmail })
-    .eq("id", leadId);
+  const update: { current_stage: string; current_owner_email: string; closed_at?: string } = {
+    current_stage: nextStage,
+    current_owner_email: nextOwnerEmail,
+  };
+  // Stamp closed_at the moment a lead enters a terminal stage — the dedup
+  // cooldown check (findDuplicateLead) reads this to decide when a contact
+  // number becomes reusable again.
+  if ((TERMINAL_STAGES as readonly string[]).includes(nextStage)) {
+    update.closed_at = new Date().toISOString();
+  }
+  const { error } = await supabaseAdmin.from("leads").update(update).eq("id", leadId);
   if (error) throw error;
   await appendAudit(leadId, `stage_change:${nextStage}`, performedBy, metadata);
 }

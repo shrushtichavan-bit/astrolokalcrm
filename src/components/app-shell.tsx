@@ -19,6 +19,7 @@ import {
   LogOut,
 } from "lucide-react";
 import { logout } from "@/lib/actions/auth-actions";
+import { ROLE_LABELS } from "@/lib/roles";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -52,7 +53,10 @@ const ADMIN_SECONDARY: NavItem[] = [
 ];
 const ADMIN_SYNC: NavItem[] = [{ href: "/sync", label: "Sync", icon: RefreshCw }];
 
-const NON_ADMIN: NavItem[] = [{ href: "/dashboard", label: "Dashboard", icon: LayoutDashboard }];
+const NON_ADMIN: NavItem[] = [
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/admin/leads/add", label: "Add Lead", icon: UserPlus },
+];
 
 function NavLink({ item, onNavigate }: { item: NavItem; onNavigate?: () => void }) {
   const pathname = usePathname();
@@ -147,13 +151,6 @@ function UserMenu({ user }: { user: ShellUser }) {
   );
 }
 
-const ROLE_LABEL: Record<string, string> = {
-  admin: "Admin",
-  lma: "Telecaller",
-  kam: "Round Taker",
-  sme: "Expert Creation",
-};
-
 export function AppShell({ user, children }: { user: ShellUser; children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
 
@@ -190,7 +187,7 @@ export function AppShell({ user, children }: { user: ShellUser; children: React.
               <Menu className="h-5 w-5" />
             </Button>
             <Badge variant="secondary" className="hidden sm:inline-flex">
-              {ROLE_LABEL[user.role] ?? user.role}
+              {ROLE_LABELS[user.role] ?? user.role}
             </Badge>
           </div>
           <UserMenu user={user} />

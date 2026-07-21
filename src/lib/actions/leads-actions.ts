@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { requireUser, requireRole } from "@/lib/auth";
+import { requireUser, requireRole, type Role } from "@/lib/auth";
 import {
   appendAudit,
   transitionLead,
@@ -149,7 +149,7 @@ export async function logCallOutcome(input: {
   let assignedKam: string | null = null;
   if (data.outcome === "connected") {
     assignedKam = await assignedFor(lead.id, "round_1");
-    if (!assignedKam) throw new Error("Round 1 taker not assigned yet — contact your admin");
+    if (!assignedKam) throw new Error("Round 1 taker not assigned — contact admin");
   }
 
   const { error: aErr } = await supabaseAdmin.from("call_attempts").upsert(
@@ -185,6 +185,12 @@ export async function logCallOutcome(input: {
     await transitionLead(lead.id, "round_1_pending", assignedKam!, u.email);
   } else if (data.outcome === "junk" || data.outcome === "not_interested") {
     await transitionLead(lead.id, data.outcome, lead.current_owner_email, u.email);
+  } else if (data.attempt_number >= 3) {
+    // 3rd RNR/Reconnect — no attempts remain. Previously this just left the
+    // lead stuck in calling_pending forever with no terminal marker; now it
+    // gets a real terminal stage so it (a) stops showing as pending anywhere
+    // and (b) becomes eligible for dedup reuse after the cooldown period.
+    await transitionLead(lead.id, "terminated", lead.current_owner_email, u.email);
   }
 
   return { ok: true };
@@ -382,18 +388,75 @@ export async function activateExpertProfile(input: { lead_id: string }) {
   return { ok: true };
 }
 
-// ---------- Lead intake (admin/lma) ----------
+// ---------- Lead intake (any role — manual, CSV bulk) ----------
+
+const INTAKE_ROLES: Role[] = ["admin", "lma", "kam", "sme"];
+
+export async function resolvePriority(source: string, override?: number | null): Promise<number> {
+  if (override != null) return override;
+  const { data: srcCfg } = await supabaseAdmin
+    .from("source_priority_config")
+    .select("priority_score, is_active")
+    .ilike("source_name", source)
+    .maybeSingle();
+  return srcCfg?.is_active ? srcCfg.priority_score : 99;
+}
+
+/** Shared insert path for addLead / bulkAddLeads / forceAllowDuplicate. Contact must already be normalized. */
+export async function insertLeadRow(input: {
+  name: string;
+  contact: string;
+  email?: string | null;
+  city?: string | null;
+  language?: string | null;
+  source: string;
+  priority: number;
+  lead_date: string;
+  assigned_telecaller_email: string;
+  performedBy: string;
+}) {
+  await requireUser();
+  const lead_id = `REF-${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+  const { data: inserted, error } = await supabaseAdmin
+    .from("leads")
+    .insert({
+      lead_id,
+      name: input.name.trim(),
+      contact: input.contact,
+      email: input.email ?? null,
+      city: input.city ?? null,
+      language: input.language ?? null,
+      source: input.source.trim(),
+      priority: input.priority,
+      assigned_to_email: input.assigned_telecaller_email,
+      current_stage: "calling_pending",
+      current_owner_email: input.assigned_telecaller_email,
+      lead_date: input.lead_date,
+    })
+    .select("id, lead_id")
+    .single();
+  if (error) throw new Error(error.message);
+  await appendAudit(inserted.id, "lead_created", input.performedBy, {
+    source: input.source,
+    priority: input.priority,
+    manual: true,
+  });
+  return inserted;
+}
 
 export async function checkDuplicate(input: { contact: string }) {
   const { contact } = z.object({ contact: z.string().min(1).max(30) }).parse(input);
-  await requireRole(["admin", "lma"]);
-  const match = await findDuplicateLead(contact);
-  return { duplicate: !!match, lead: match };
+  await requireRole(INTAKE_ROLES);
+  const result = await findDuplicateLead(contact);
+  return { duplicate: result.blocking, lead: result.match, reason: result.reason };
 }
 
 export async function addLead(input: {
   name: string;
   contact: string;
+  email?: string | null;
+  city?: string | null;
+  language?: string | null;
   source: string;
   priority?: number | null;
   lead_date?: string | null;
@@ -403,6 +466,9 @@ export async function addLead(input: {
     .object({
       name: z.string().min(1).max(200),
       contact: z.string().min(1).max(30),
+      email: z.string().email().max(255).nullish(),
+      city: z.string().max(200).nullish(),
+      language: z.string().max(100).nullish(),
       source: z.string().min(1).max(200),
       priority: z.number().int().min(1).max(99).nullish(),
       lead_date: z.string().nullish(),
@@ -410,56 +476,151 @@ export async function addLead(input: {
     })
     .parse(input);
 
-  const u = await requireRole(["admin", "lma"]);
+  const u = await requireRole(INTAKE_ROLES);
 
   const normalized = normalizeContact(data.contact);
   if (!normalized) throw new Error("Contact number must be a valid 10-digit mobile number");
 
-  const dup = await findDuplicateLead(data.contact);
-  if (dup) {
+  const dedup = await findDuplicateLead(data.contact);
+  if (dedup.blocking) {
     await logDuplicate({
       incoming_name: data.name,
       incoming_contact: normalized,
       incoming_source: data.source,
-      matched_lead_id: dup.id,
+      matched_lead_id: dedup.match!.id,
       detected_by: u.email,
+      payload: { ...data, contact: normalized },
     });
-    return { ok: false as const, duplicate: true as const, matched_lead: dup };
+    return { ok: false as const, duplicate: true as const, matched_lead: dedup.match!, reason: dedup.reason };
   }
 
   const telecaller = data.assigned_telecaller_email.toLowerCase();
   const callingPool = await poolMembers("calling");
   if (!callingPool.includes(telecaller)) throw new Error("Selected telecaller is not in the calling pool");
 
-  let priority = data.priority ?? null;
-  if (priority == null) {
-    const { data: srcCfg } = await supabaseAdmin
-      .from("source_priority_config")
-      .select("priority_score, is_active")
-      .ilike("source_name", data.source)
-      .maybeSingle();
-    priority = srcCfg?.is_active ? srcCfg.priority_score : 99;
+  const priority = await resolvePriority(data.source, data.priority);
+  const inserted = await insertLeadRow({
+    name: data.name,
+    contact: normalized,
+    email: data.email,
+    city: data.city,
+    language: data.language,
+    source: data.source,
+    priority,
+    lead_date: data.lead_date ?? new Date().toISOString().slice(0, 10),
+    assigned_telecaller_email: telecaller,
+    performedBy: u.email,
+  });
+  return { ok: true as const, duplicate: false as const, lead: inserted };
+}
+
+const BulkRowSchema = z.object({
+  name: z.string().min(1).max(200),
+  contact: z.string().min(1).max(30),
+  email: z.string().max(255).nullish(),
+  city: z.string().max(200).nullish(),
+  language: z.string().max(100).nullish(),
+  source: z.string().min(1).max(200),
+  lead_date: z.string().nullish(),
+});
+
+export async function bulkAddLeads(input: {
+  rows: Array<{
+    name: string;
+    contact: string;
+    email?: string | null;
+    city?: string | null;
+    language?: string | null;
+    source: string;
+    lead_date?: string | null;
+  }>;
+  assigned_telecaller_email: string;
+}) {
+  const data = z
+    .object({
+      rows: z.array(BulkRowSchema).min(1).max(1000),
+      assigned_telecaller_email: z.string().email().max(255),
+    })
+    .parse(input);
+
+  const u = await requireRole(INTAKE_ROLES);
+
+  const telecaller = data.assigned_telecaller_email.toLowerCase();
+  const callingPool = await poolMembers("calling");
+  if (!callingPool.includes(telecaller)) throw new Error("Selected telecaller is not in the calling pool");
+
+  let added = 0;
+  const duplicates: Array<{
+    row: number;
+    name: string;
+    contact: string;
+    matched_lead_id: string | null;
+    matched_lead_name: string;
+    reason: string | null;
+  }> = [];
+  const errors: Array<{ row: number; message: string }> = [];
+  // Catches duplicate rows within the same file, not just against the DB.
+  const stagedContacts = new Set<string>();
+
+  for (let i = 0; i < data.rows.length; i++) {
+    const rowNum = i + 2; // header is row 1
+    const row = data.rows[i];
+    try {
+      const normalized = normalizeContact(row.contact);
+      if (!normalized) {
+        errors.push({ row: rowNum, message: "Invalid contact number (must be 10 digits)" });
+        continue;
+      }
+      if (stagedContacts.has(normalized)) {
+        duplicates.push({
+          row: rowNum,
+          name: row.name,
+          contact: normalized,
+          matched_lead_id: null,
+          matched_lead_name: "(duplicate within this file)",
+          reason: "active",
+        });
+        continue;
+      }
+      const dedup = await findDuplicateLead(row.contact);
+      if (dedup.blocking) {
+        await logDuplicate({
+          incoming_name: row.name,
+          incoming_contact: normalized,
+          incoming_source: row.source,
+          matched_lead_id: dedup.match!.id,
+          detected_by: u.email,
+          payload: { ...row, contact: normalized, assigned_telecaller_email: telecaller },
+        });
+        duplicates.push({
+          row: rowNum,
+          name: row.name,
+          contact: normalized,
+          matched_lead_id: dedup.match!.id,
+          matched_lead_name: dedup.match!.name,
+          reason: dedup.reason,
+        });
+        continue;
+      }
+      const priority = await resolvePriority(row.source, null);
+      await insertLeadRow({
+        name: row.name,
+        contact: normalized,
+        email: row.email,
+        city: row.city,
+        language: row.language,
+        source: row.source,
+        priority,
+        lead_date: row.lead_date ?? new Date().toISOString().slice(0, 10),
+        assigned_telecaller_email: telecaller,
+        performedBy: u.email,
+      });
+      stagedContacts.add(normalized);
+      added++;
+    } catch (e) {
+      errors.push({ row: rowNum, message: (e as Error).message });
+    }
   }
 
-  const lead_id = `REF-${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
-
-  const { data: inserted, error } = await supabaseAdmin
-    .from("leads")
-    .insert({
-      lead_id,
-      name: data.name.trim(),
-      contact: normalized,
-      source: data.source.trim(),
-      priority,
-      assigned_to_email: telecaller,
-      current_stage: "calling_pending",
-      current_owner_email: telecaller,
-      lead_date: data.lead_date ?? new Date().toISOString().slice(0, 10),
-    })
-    .select("id, lead_id")
-    .single();
-  if (error) throw new Error(error.message);
-
-  await appendAudit(inserted.id, "lead_created", u.email, { source: data.source, priority, manual: true });
-  return { ok: true as const, duplicate: false as const, lead: inserted };
+  return { added, duplicates, errors, total: data.rows.length };
 }
