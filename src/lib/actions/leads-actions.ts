@@ -87,6 +87,8 @@ export async function getLead(input: { id: string }) {
       supabaseAdmin.from("lead_stage_assignments").select("stage, assigned_email").eq("lead_id", lead.id),
     ]);
   const { num_rounds } = await loadRoundConfig();
+  const { data: users } = await supabaseAdmin.from("users").select("email, name");
+  const names: Record<string, string> = Object.fromEntries((users ?? []).map((u) => [u.email, u.name]));
 
   return {
     lead,
@@ -96,6 +98,7 @@ export async function getLead(input: { id: string }) {
     profile,
     assignments: assignments ?? [],
     cfg: { num_rounds },
+    names,
   };
 }
 
@@ -104,7 +107,10 @@ export async function getPool(input: { stage: string }) {
     .object({ stage: z.enum(["calling", "round_1", "round_2", "round_3", "round_4", "expert_creation"]) })
     .parse(input);
   await requireUser();
-  return { members: await poolMembers(stage) };
+  const members = await poolMembers(stage);
+  const { data: users } = await supabaseAdmin.from("users").select("email, name").in("email", members.length ? members : [""]);
+  const names: Record<string, string> = Object.fromEntries((users ?? []).map((u) => [u.email, u.name]));
+  return { members, names };
 }
 
 // ---------- Telecaller ----------

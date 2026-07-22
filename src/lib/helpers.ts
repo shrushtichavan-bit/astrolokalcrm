@@ -81,3 +81,37 @@ export async function loadLeadOwned(leadId: string, ownerEmail: string, opts: { 
 export function round1(n: number): number {
   return Math.round(n * 10) / 10;
 }
+
+/** Turns raw audit_log action strings (e.g. "stage_change:round_2_pending") into plain English. */
+export function describeAuditAction(action: string, metadata: unknown): string {
+  const meta = (metadata ?? {}) as Record<string, unknown>;
+  const roundNumber = typeof meta.round_number === "number" ? meta.round_number : null;
+
+  if (action === "lead_created") return "lead created";
+  if (action === "telecaller_assigned") return "telecaller assigned";
+
+  const attemptMatch = action.match(/^attempt_\d+:(.+)$/);
+  if (attemptMatch) {
+    return attemptMatch[1] === "connected" ? "connected" : "call attempt logged";
+  }
+
+  if (action.startsWith("stage_change:")) {
+    const stage = action.slice("stage_change:".length);
+    const roundPendingMatch = stage.match(/^round_(\d+)_pending$/);
+    if (roundPendingMatch) {
+      return roundNumber != null
+        ? `round ${roundNumber} submitted — passed`
+        : `passed to round ${roundPendingMatch[1]}`;
+    }
+    if (stage === "failed") return roundNumber != null ? `round ${roundNumber} submitted — failed` : "failed";
+    if (stage === "profile_creation_pending") return "passed to expert creation";
+    if (stage === "profile_created") return "profile created";
+    if (stage === "active") return "expert activated";
+    if (stage === "junk") return "marked junk";
+    if (stage === "not_interested") return "marked not interested";
+    if (stage === "terminated") return "call attempts exhausted";
+    return stage.replace(/_/g, " ");
+  }
+
+  return action.replace(/[_:]/g, " ");
+}

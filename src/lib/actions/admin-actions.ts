@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { requireRole } from "@/lib/auth";
-import { round1, poolMembers } from "@/lib/helpers";
+import { round1, poolMembers, describeAuditAction } from "@/lib/helpers";
 import { insertLeadRow, resolvePriority } from "@/lib/actions/leads-actions";
 import { normalizeContact } from "@/lib/dedup";
 
@@ -499,11 +499,14 @@ function roundLabel(r: { passed: boolean | null; submitted_at: string | null } |
 async function enrichLeads(leads: Array<Record<string, unknown>>): Promise<ListRow[]> {
   if (leads.length === 0) return [];
   const ids = leads.map((l) => l.id as string);
-  const [{ data: cs }, { data: rounds }, { data: assignments }] = await Promise.all([
+  const [{ data: cs }, { data: rounds }, { data: assignments }, { data: users }] = await Promise.all([
     supabaseAdmin.from("calling_status").select("lead_id, status").in("lead_id", ids),
     supabaseAdmin.from("interview_rounds").select("lead_id, round_number, passed, submitted_at").in("lead_id", ids).in("round_number", [1, 2]),
     supabaseAdmin.from("lead_stage_assignments").select("lead_id, stage, assigned_email").in("lead_id", ids),
+    supabaseAdmin.from("users").select("email, name"),
   ]);
+  const nameByEmail = new Map((users ?? []).map((u) => [u.email, u.name]));
+  const resolve = (email: string | null | undefined) => (email ? (nameByEmail.get(email) ?? email) : "—");
   const csBy = new Map((cs ?? []).map((s) => [s.lead_id, s]));
   const r1By = new Map<string, { passed: boolean | null; submitted_at: string | null }>();
   const r2By = new Map<string, { passed: boolean | null; submitted_at: string | null }>();
@@ -537,17 +540,17 @@ async function enrichLeads(leads: Array<Record<string, unknown>>): Promise<ListR
       contact: l.contact as string,
       lead_date: (l.lead_date as string) ?? null,
       priority: l.priority as number,
-      caller: l.assigned_to_email as string,
+      caller: resolve(l.assigned_to_email as string | null),
       calling_status: (csBy.get(id)?.status as string) ?? "—",
       round_1_status: roundLabel(r1),
       round_2_status: roundLabel(r2),
       verdict,
       current_stage: stage,
       updated_at: l.updated_at as string,
-      calling_assignee: chain.calling ?? "—",
-      round_1_assignee: chain.round_1 ?? "—",
-      round_2_assignee: chain.round_2 ?? "—",
-      expert_creation_assignee: chain.expert_creation ?? "—",
+      calling_assignee: resolve(chain.calling),
+      round_1_assignee: resolve(chain.round_1),
+      round_2_assignee: resolve(chain.round_2),
+      expert_creation_assignee: resolve(chain.expert_creation),
     };
   });
 }
@@ -620,24 +623,46 @@ export async function listAllPeople() {
   return { people: data ?? [] };
 }
 
-export async function getRecentActivity() {
+export async function getRecentActivity(input: DateOnlyT = {}) {
+  const f = DateOnly.parse(input);
   await requireRole("admin");
+  const hasDateFilter = Boolean(f.from || f.to);
+
   const { data, error } = await supabaseAdmin
     .from("audit_log")
-    .select("id, lead_id, action, performed_by, performed_at")
+    .select("id, lead_id, action, performed_by, performed_at, metadata")
     .order("performed_at", { ascending: false })
-    .limit(20);
+    .limit(hasDateFilter ? 300 : 20);
   if (error) throw error;
+
   const leadIds = Array.from(new Set((data ?? []).map((r) => r.lead_id).filter(Boolean))) as string[];
   const { data: leads } = leadIds.length
-    ? await supabaseAdmin.from("leads").select("id, lead_id, name").in("id", leadIds)
+    ? await supabaseAdmin.from("leads").select("id, lead_id, name, lead_date").in("id", leadIds)
     : { data: [] };
   const leadById = new Map((leads ?? []).map((l) => [l.id, l]));
+
+  const { data: users } = await supabaseAdmin.from("users").select("email, name");
+  const nameByEmail = new Map((users ?? []).map((u) => [u.email, u.name]));
+
+  let scoped = data ?? [];
+  if (hasDateFilter) {
+    scoped = scoped.filter((r) => {
+      if (!r.lead_id) return false;
+      const lead = leadById.get(r.lead_id);
+      const leadDate = lead?.lead_date ?? null;
+      if (!leadDate) return false;
+      if (f.from && leadDate < f.from) return false;
+      if (f.to && leadDate > f.to) return false;
+      return true;
+    });
+  }
+
   return {
-    rows: (data ?? []).map((r) => ({
+    rows: scoped.slice(0, 20).map((r) => ({
       id: r.id,
       action: r.action,
-      performed_by: r.performed_by,
+      description: describeAuditAction(r.action, r.metadata),
+      performed_by: nameByEmail.get(r.performed_by) ?? r.performed_by,
       performed_at: r.performed_at,
       lead: r.lead_id ? (leadById.get(r.lead_id) ?? null) : null,
     })),

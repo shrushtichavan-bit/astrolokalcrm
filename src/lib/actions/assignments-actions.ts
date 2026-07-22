@@ -56,14 +56,22 @@ export async function getUnassignedFilterOptions() {
 /** Leads that already have a telecaller — the Assigned tab. */
 export async function getAssignedTelecallerLeads() {
   await requireRole("admin");
-  const { data, error } = await supabaseAdmin
-    .from("leads")
-    .select("id, lead_id, name, contact, source, priority, lead_date, current_stage, assigned_to_email")
-    .not("assigned_to_email", "is", null)
-    .order("updated_at", { ascending: false })
-    .limit(500);
+  const [{ data, error }, { data: users }] = await Promise.all([
+    supabaseAdmin
+      .from("leads")
+      .select("id, lead_id, name, contact, source, priority, lead_date, current_stage, assigned_to_email")
+      .not("assigned_to_email", "is", null)
+      .order("updated_at", { ascending: false })
+      .limit(500),
+    supabaseAdmin.from("users").select("email, name"),
+  ]);
   if (error) throw error;
-  return { leads: data ?? [] };
+  const nameByEmail = new Map((users ?? []).map((u) => [u.email, u.name]));
+  const leads = (data ?? []).map((l) => ({
+    ...l,
+    assigned_name: l.assigned_to_email ? (nameByEmail.get(l.assigned_to_email) ?? l.assigned_to_email) : null,
+  }));
+  return { leads };
 }
 
 /** Assign (or reassign) a telecaller for one or more leads — the only stage Allotment sets upfront now. */

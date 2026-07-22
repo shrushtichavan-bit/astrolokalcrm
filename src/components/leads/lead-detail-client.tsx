@@ -135,10 +135,11 @@ type TimelineItem = {
 };
 
 function LeadTimeline({ data }: { data: LeadData }) {
-  const { lead, attempts, rounds, profile, assignments } = data;
+  const { lead, attempts, rounds, profile, assignments, names } = data;
   const [openId, setOpenId] = React.useState<string | null>(null);
   const numRounds = data.cfg.num_rounds;
   const assignedByStage = new Map((assignments ?? []).map((a) => [a.stage, a.assigned_email]));
+  const nameOf = (email: string | null | undefined) => (email ? (names[email] ?? email) : null);
 
   const items: TimelineItem[] = [];
 
@@ -170,10 +171,10 @@ function LeadTimeline({ data }: { data: LeadData }) {
     state: callingState,
     pill: callingOutcome ? (callingOutcome as StatusKind) : "pending",
     pillLabel: callingOutcome ? (OUTCOME_LABELS[callingOutcome] ?? callingOutcome) : "Pending",
-    assignedTo: assignedByStage.get("calling") ?? lead.assigned_to_email,
+    assignedTo: nameOf(assignedByStage.get("calling") ?? lead.assigned_to_email),
     details: (
       <div className="space-y-2 text-sm text-muted-foreground">
-        <div>Assigned to: <span className="font-medium text-foreground">{assignedByStage.get("calling") ?? lead.assigned_to_email}</span></div>
+        <div>Assigned to: <span className="font-medium text-foreground">{nameOf(assignedByStage.get("calling") ?? lead.assigned_to_email)}</span></div>
         {sortedAttempts.length === 0 && <div>No attempts logged yet.</div>}
         {sortedAttempts.map((a) => {
           const o = (a as { outcome?: string | null }).outcome ?? (a.connected ? "connected" : "rnr");
@@ -218,12 +219,12 @@ function LeadTimeline({ data }: { data: LeadData }) {
       state,
       pill,
       pillLabel,
-      assignedTo: assignedTo ?? null,
+      assignedTo: nameOf(assignedTo) ?? null,
       details: (
         <div className="space-y-1 text-sm text-muted-foreground">
           <div>
             Conducted by:{" "}
-            <span className="font-medium text-foreground">{round?.conducted_by ?? assignedTo ?? "Not started yet"}</span>
+            <span className="font-medium text-foreground">{nameOf(round?.conducted_by) ?? nameOf(assignedTo) ?? "Not started yet"}</span>
           </div>
           {round?.total_score != null && <div>Score: <span className="font-medium text-foreground">{round.total_score}</span></div>}
           {round?.remarks && <div>Notes: {round.remarks}</div>}
@@ -260,12 +261,12 @@ function LeadTimeline({ data }: { data: LeadData }) {
     state: creationState,
     pill: creationPill,
     pillLabel: creationLabel,
-    assignedTo: assignedCreation ?? null,
+    assignedTo: nameOf(assignedCreation) ?? null,
     details: (
       <div className="space-y-1 text-sm text-muted-foreground">
         <div>
           Assigned to:{" "}
-          <span className="font-medium text-foreground">{profile?.linked_by ?? assignedCreation ?? "Not started yet"}</span>
+          <span className="font-medium text-foreground">{nameOf(profile?.linked_by) ?? nameOf(assignedCreation) ?? "Not started yet"}</span>
         </div>
         {profile && <div>Expert ID: <span className="font-mono text-foreground">{profile.expert_id}</span></div>}
       </div>
@@ -324,10 +325,11 @@ function ActionsPanel({ data, userEmail, onChanged }: { data: LeadData; userEmai
           : stage.startsWith("round_") && stage.endsWith("_pending")
             ? `Round ${stage.replace(/[^0-9]/g, "")}`
             : stage;
+    const ownerName = data.lead.current_owner_email ? (data.names[data.lead.current_owner_email] ?? data.lead.current_owner_email) : "—";
     return (
       <Card>
         <CardContent className="p-6">
-          <p className="text-base font-semibold text-foreground">Passed to {data.lead.current_owner_email}</p>
+          <p className="text-base font-semibold text-foreground">Passed to {ownerName}</p>
           <p className="mt-2 text-sm text-muted-foreground">For {forLabel}</p>
           <p className="mt-4 text-sm text-muted-foreground">Your work on this lead is complete.</p>
         </CardContent>
@@ -383,6 +385,7 @@ function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => 
 
   const remarksRequired = outcome === "junk" || outcome === "not_interested";
   const round1Pool = round1PoolQ.data?.members ?? [];
+  const round1Names = round1PoolQ.data?.names ?? {};
 
   async function save() {
     if (!outcome) {
@@ -406,7 +409,7 @@ function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => 
         remarks: remarks || null,
         next_owner_email: outcome === "connected" ? nextOwner : null,
       });
-      toast.success(outcome === "connected" ? `Lead passed to ${nextOwner} for Round 1.` : "Attempt saved.");
+      toast.success(outcome === "connected" ? `Lead passed to ${round1Names[nextOwner] ?? nextOwner} for Round 1.` : "Attempt saved.");
       setOutcome(null);
       setRemarks("");
       setNextOwner("");
@@ -451,7 +454,7 @@ function CallingActions({ data, onChanged }: { data: LeadData; onChanged: () => 
             <Select value={nextOwner} onValueChange={setNextOwner}>
               <SelectTrigger><SelectValue placeholder="Select person" /></SelectTrigger>
               <SelectContent>
-                {round1Pool.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                {round1Pool.map((m) => <SelectItem key={m} value={m}>{round1Names[m] ?? m}</SelectItem>)}
               </SelectContent>
             </Select>
             {round1Pool.length === 0 && (
@@ -488,6 +491,7 @@ function RoundActions({ data, round, onChanged }: { data: LeadData; round: numbe
   const nextStageLabel = isLastRound ? "Expert Creation" : `Round ${round + 1}`;
   const nextPoolQ = useQuery({ queryKey: ["pool", nextStageKey], queryFn: () => getPool({ stage: nextStageKey }), staleTime: 5 * 60_000 });
   const nextPool = nextPoolQ.data?.members ?? [];
+  const nextNames = nextPoolQ.data?.names ?? {};
 
   const [grades, setGrades] = React.useState<Record<string, number>>({});
   const [remarks, setRemarks] = React.useState("");
@@ -544,7 +548,7 @@ function RoundActions({ data, round, onChanged }: { data: LeadData; round: numbe
           </p>
           {passed && (
             <p className="mt-2 text-sm text-muted-foreground">
-              Lead moving to <span className="font-medium text-foreground">{nextOwner}</span> for {nextStageLabel}.
+              Lead moving to <span className="font-medium text-foreground">{nextNames[nextOwner] ?? nextOwner}</span> for {nextStageLabel}.
             </p>
           )}
         </CardContent>
@@ -608,7 +612,7 @@ function RoundActions({ data, round, onChanged }: { data: LeadData; round: numbe
           <Select value={nextOwner} onValueChange={setNextOwner}>
             <SelectTrigger><SelectValue placeholder="Select person" /></SelectTrigger>
             <SelectContent>
-              {nextPool.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+              {nextPool.map((m) => <SelectItem key={m} value={m}>{nextNames[m] ?? m}</SelectItem>)}
             </SelectContent>
           </Select>
           {nextPool.length === 0 && (

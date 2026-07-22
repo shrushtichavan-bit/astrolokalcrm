@@ -209,7 +209,7 @@ function AllLeadsPageInner() {
                       <TableCell className="text-xs text-muted-foreground">{r.round_2_assignee}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">{r.expert_creation_assignee}</TableCell>
                       <TableCell className="text-right">
-                        <Link href={`/leads/${r.id}`} className="text-xs font-medium text-primary hover:underline">Open</Link>
+                        <Link href={`/leads/${r.id}`} className="text-xs font-medium text-primary hover:underline">View Lead</Link>
                       </TableCell>
                     </TableRow>
                   ))}

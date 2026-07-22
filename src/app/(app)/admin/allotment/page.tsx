@@ -11,6 +11,7 @@ import {
   assignTelecallerBulk,
 } from "@/lib/actions/assignments-actions";
 import { getPool } from "@/lib/actions/leads-actions";
+import { listAllPeople } from "@/lib/actions/admin-actions";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { PriorityBadge } from "@/components/priority-badge";
@@ -100,6 +101,8 @@ function UnassignedTab() {
 
   const optionsQ = useQuery({ queryKey: ["allotment-filter-options"], queryFn: () => getUnassignedFilterOptions() });
   const poolQ = useQuery({ queryKey: ["pool", "calling"], queryFn: () => getPool({ stage: "calling" }), staleTime: 5 * 60_000 });
+  const peopleQ = useQuery({ queryKey: ["admin-people"], queryFn: () => listAllPeople(), staleTime: 5 * 60_000 });
+  const nameByEmail = React.useMemo(() => new Map((peopleQ.data?.people ?? []).map((p) => [p.email, p.name])), [peopleQ.data]);
 
   const filters = React.useMemo(
     () => ({
@@ -227,7 +230,7 @@ function UnassignedTab() {
             <Select value={assignTo} onValueChange={setAssignTo}>
               <SelectTrigger className="w-64"><SelectValue placeholder="Select telecaller" /></SelectTrigger>
               <SelectContent>
-                {(poolQ.data?.members ?? []).map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                {(poolQ.data?.members ?? []).map((m) => <SelectItem key={m} value={m}>{nameByEmail.get(m) ?? m}</SelectItem>)}
               </SelectContent>
             </Select>
             <Button onClick={assign} disabled={busy}>{busy ? "Assigning…" : "Assign Telecaller"}</Button>
@@ -242,6 +245,8 @@ function AssignedTab() {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["admin-assigned-leads"], queryFn: () => getAssignedTelecallerLeads() });
   const poolQ = useQuery({ queryKey: ["pool", "calling"], queryFn: () => getPool({ stage: "calling" }), staleTime: 5 * 60_000 });
+  const peopleQ = useQuery({ queryKey: ["admin-people"], queryFn: () => listAllPeople(), staleTime: 5 * 60_000 });
+  const nameByEmail = React.useMemo(() => new Map((peopleQ.data?.people ?? []).map((p) => [p.email, p.name])), [peopleQ.data]);
   const [reassigningId, setReassigningId] = React.useState<string | null>(null);
   const [reassignTo, setReassignTo] = React.useState("");
   const [busy, setBusy] = React.useState(false);
@@ -300,7 +305,7 @@ function AssignedTab() {
                     <TableCell className="tabular-nums text-muted-foreground">{formatContact(l.contact)}</TableCell>
                     <TableCell className="text-muted-foreground">{l.source ?? "—"}</TableCell>
                     <TableCell><PriorityBadge priority={l.priority} /></TableCell>
-                    <TableCell className="text-muted-foreground">{l.assigned_to_email}</TableCell>
+                    <TableCell className="text-muted-foreground">{l.assigned_name ?? l.assigned_to_email}</TableCell>
                     <TableCell className="text-xs">{l.current_stage}</TableCell>
                     <TableCell className="text-muted-foreground">{l.lead_date ?? "—"}</TableCell>
                     <TableCell className="text-right">
@@ -309,7 +314,7 @@ function AssignedTab() {
                           <Select value={reassignTo} onValueChange={setReassignTo}>
                             <SelectTrigger className="h-8 w-44"><SelectValue placeholder="Telecaller" /></SelectTrigger>
                             <SelectContent>
-                              {(poolQ.data?.members ?? []).map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                              {(poolQ.data?.members ?? []).map((m) => <SelectItem key={m} value={m}>{nameByEmail.get(m) ?? m}</SelectItem>)}
                             </SelectContent>
                           </Select>
                           <Button size="sm" disabled={busy} onClick={() => confirmReassign(l.id)}>Confirm</Button>
