@@ -159,7 +159,7 @@ export function AppShell({ user, children }: { user: ShellUser; children: React.
   const [mobileOpen, setMobileOpen] = React.useState(false);
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex h-screen overflow-hidden">
       {/* Desktop sidebar */}
       <aside className="hidden w-64 shrink-0 border-r border-border bg-card md:flex md:flex-col">
         <SidebarLogo />
@@ -180,7 +180,7 @@ export function AppShell({ user, children }: { user: ShellUser; children: React.
         </SheetContent>
       </Sheet>
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-3 border-b border-border bg-card/80 px-4 backdrop-blur md:px-6">
           <div className="flex items-center gap-3">
             <Button
@@ -198,7 +198,7 @@ export function AppShell({ user, children }: { user: ShellUser; children: React.
           </div>
           <UserMenu user={user} />
         </header>
-        <main className="flex-1 p-6">{children}</main>
+        <main className="flex-1 overflow-y-auto p-6">{children}</main>
       </div>
     </div>
   );
