@@ -5,10 +5,11 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Users2 } from "lucide-react";
+import { Users2, Check, X } from "lucide-react";
 import { listAllLeads, listAllPeople, exportLeadsCsv } from "@/lib/actions/admin-actions";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
+import { StatusPill, stageToPill } from "@/components/status-badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,6 +17,57 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+
+const ATTEMPT_CHIP_LABELS: Record<string, string> = {
+  connected: "Connected",
+  rnr: "RNR",
+  reconnect: "Reconnect",
+  junk: "Junk",
+  not_interested: "Not Interested",
+};
+
+function attemptChipClass(outcome: string): string {
+  if (outcome === "connected") return "bg-success/10 text-success";
+  if (outcome === "rnr" || outcome === "reconnect") return "bg-amber-100 text-amber-800";
+  if (outcome === "junk" || outcome === "not_interested") return "bg-destructive/10 text-destructive";
+  return "bg-muted text-muted-foreground";
+}
+
+function AttemptChip({ outcome }: { outcome: string }) {
+  return (
+    <span className={`inline-flex w-full items-center justify-center rounded px-1.5 py-0.5 text-[10px] font-medium ${attemptChipClass(outcome)}`}>
+      {outcome ? (ATTEMPT_CHIP_LABELS[outcome] ?? outcome) : "–"}
+    </span>
+  );
+}
+
+function CallingAttemptsCell({ a1, a2, a3 }: { a1: string; a2: string; a3: string }) {
+  return (
+    <div className="flex w-32 gap-1">
+      <AttemptChip outcome={a1} />
+      <AttemptChip outcome={a2} />
+      <AttemptChip outcome={a3} />
+    </div>
+  );
+}
+
+function RoundResultCell({ result, interviewer }: { result: "passed" | "failed" | ""; interviewer: string }) {
+  return (
+    <div className="flex flex-col items-start gap-0.5">
+      {result === "passed" && (
+        <span className="inline-flex h-5 w-5 items-center justify-center rounded border border-success/30 bg-success/10">
+          <Check className="h-3.5 w-3.5 text-success/70" strokeWidth={2.5} />
+        </span>
+      )}
+      {result === "failed" && (
+        <span className="inline-flex h-5 w-5 items-center justify-center rounded border border-destructive/30 bg-destructive/10">
+          <X className="h-3.5 w-3.5 text-destructive/70" strokeWidth={2.5} />
+        </span>
+      )}
+      {interviewer && <span className="text-xs text-muted-foreground">{interviewer}</span>}
+    </div>
+  );
+}
 
 const STAGES = [
   "calling_pending", "round_1_pending", "round_2_pending", "round_3_pending", "round_4_pending",
@@ -181,6 +233,9 @@ function AllLeadsPageInner() {
                     <TableHead>Round 1</TableHead>
                     <TableHead>Round 2</TableHead>
                     <TableHead>Verdict</TableHead>
+                    <TableHead>Calling Attempts</TableHead>
+                    <TableHead>R1 Result</TableHead>
+                    <TableHead>R2 Result</TableHead>
                     <SortableTh k="stage" label="Current Stage" />
                     <SortableTh k="updated" label="Last Updated" />
                     <TableHead>Telecaller (Chain)</TableHead>
@@ -191,28 +246,42 @@ function AllLeadsPageInner() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {visibleRows.map((r) => (
-                    <TableRow key={r.id}>
-                      <TableCell className="font-mono text-[11px]">{r.lead_id}</TableCell>
-                      <TableCell>{r.name}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{r.contact}</TableCell>
-                      <TableCell className="text-muted-foreground">{r.lead_date ?? "—"}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{r.caller}</TableCell>
-                      <TableCell>{r.calling_status}</TableCell>
-                      <TableCell>{r.round_1_status}</TableCell>
-                      <TableCell>{r.round_2_status}</TableCell>
-                      <TableCell>{r.verdict}</TableCell>
-                      <TableCell className="text-xs">{r.current_stage}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{r.updated_at ? new Date(r.updated_at).toLocaleString() : "—"}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{r.calling_assignee}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{r.round_1_assignee}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{r.round_2_assignee}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{r.expert_creation_assignee}</TableCell>
-                      <TableCell className="text-right">
-                        <Link href={`/leads/${r.id}`} className="text-xs font-medium text-primary hover:underline">View Lead</Link>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {visibleRows.map((r) => {
+                    const pill = stageToPill(r.current_stage);
+                    return (
+                      <TableRow key={r.id} className="h-12 transition-colors hover:bg-accent/50">
+                        <TableCell className="font-mono text-[11px]">{r.lead_id}</TableCell>
+                        <TableCell>{r.name}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{r.contact}</TableCell>
+                        <TableCell className="text-muted-foreground">{r.lead_date ?? "—"}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{r.caller}</TableCell>
+                        <TableCell>{r.calling_status}</TableCell>
+                        <TableCell>{r.round_1_status}</TableCell>
+                        <TableCell>{r.round_2_status}</TableCell>
+                        <TableCell>{r.verdict}</TableCell>
+                        <TableCell>
+                          <CallingAttemptsCell a1={r.attempt_1_outcome} a2={r.attempt_2_outcome} a3={r.attempt_3_outcome} />
+                        </TableCell>
+                        <TableCell>
+                          <RoundResultCell result={r.r1_result} interviewer={r.r1_interviewer} />
+                        </TableCell>
+                        <TableCell>
+                          <RoundResultCell result={r.r2_result} interviewer={r.r2_interviewer} />
+                        </TableCell>
+                        <TableCell className="text-xs">
+                          <StatusPill kind={pill.kind} label={pill.label} />
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{r.updated_at ? new Date(r.updated_at).toLocaleString() : "—"}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{r.calling_assignee}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{r.round_1_assignee}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{r.round_2_assignee}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{r.expert_creation_assignee}</TableCell>
+                        <TableCell className="text-right">
+                          <Link href={`/leads/${r.id}`} className="text-xs font-medium text-primary hover:underline">View Lead</Link>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </CardContent>

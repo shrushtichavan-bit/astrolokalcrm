@@ -53,7 +53,24 @@ const ADMIN_SECONDARY: NavItem[] = [
 ];
 const SYNC_ITEM: NavItem = { href: "/sync", label: "Sync", icon: RefreshCw };
 
-const NON_ADMIN: NavItem[] = [
+// KAM: allotment, all leads, add lead, config, sync, dashboard.
+const KAM_NAV: NavItem[] = [
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/admin/allotment", label: "Allotment", icon: ListChecks },
+  { href: "/admin/leads", label: "All Leads", icon: Users2 },
+  { href: "/admin/leads/add", label: "Add Lead", icon: UserPlus },
+  { href: "/admin/config", label: "Config", icon: Settings },
+];
+// LMA: does round 1/2 interviews + expert profile creation. Access: dashboard,
+// all leads, add lead, config, sync — no allotment (that's KAM/admin only).
+const LMA_NAV: NavItem[] = [
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/admin/leads", label: "All Leads", icon: Users2 },
+  { href: "/admin/leads/add", label: "Add Lead", icon: UserPlus },
+  { href: "/admin/config", label: "Config", icon: Settings },
+];
+// Telecaller: calling attempts only. Access: dashboard, add lead.
+const TELECALLER_NAV: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/admin/leads/add", label: "Add Lead", icon: UserPlus },
 ];
@@ -78,22 +95,23 @@ function NavLink({ item, onNavigate }: { item: NavItem; onNavigate?: () => void 
 }
 
 function SidebarNav({ role, onNavigate }: { role: string; onNavigate?: () => void }) {
-  if (role !== "admin") {
+  if (role === "admin") {
     return (
       <nav className="flex flex-col gap-1">
-        {NON_ADMIN.map((item) => (
+        {ADMIN_PRIMARY.map((item) => (
+          <NavLink key={item.href} item={item} onNavigate={onNavigate} />
+        ))}
+        <div className="my-2 h-px bg-border" />
+        {ADMIN_SECONDARY.map((item) => (
           <NavLink key={item.href} item={item} onNavigate={onNavigate} />
         ))}
       </nav>
     );
   }
+  const items = role === "kam" ? KAM_NAV : role === "lma" ? LMA_NAV : TELECALLER_NAV;
   return (
     <nav className="flex flex-col gap-1">
-      {ADMIN_PRIMARY.map((item) => (
-        <NavLink key={item.href} item={item} onNavigate={onNavigate} />
-      ))}
-      <div className="my-2 h-px bg-border" />
-      {ADMIN_SECONDARY.map((item) => (
+      {items.map((item) => (
         <NavLink key={item.href} item={item} onNavigate={onNavigate} />
       ))}
     </nav>
@@ -157,6 +175,7 @@ function UserMenu({ user }: { user: ShellUser }) {
 
 export function AppShell({ user, children }: { user: ShellUser; children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
+  const showSync = user.role === "admin" || user.role === "kam" || user.role === "lma";
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -166,7 +185,7 @@ export function AppShell({ user, children }: { user: ShellUser; children: React.
         <div className="flex-1 overflow-y-auto px-3 py-2">
           <SidebarNav role={user.role} />
         </div>
-        <SidebarSync />
+        {showSync && <SidebarSync />}
       </aside>
 
       {/* Mobile drawer */}
@@ -176,7 +195,7 @@ export function AppShell({ user, children }: { user: ShellUser; children: React.
           <div className="flex-1 overflow-y-auto px-3 py-2">
             <SidebarNav role={user.role} onNavigate={() => setMobileOpen(false)} />
           </div>
-          <SidebarSync onNavigate={() => setMobileOpen(false)} />
+          {showSync && <SidebarSync onNavigate={() => setMobileOpen(false)} />}
         </SheetContent>
       </Sheet>
 

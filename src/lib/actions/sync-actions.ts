@@ -10,7 +10,7 @@
 import { requireRole } from "@/lib/auth";
 
 async function notConfigured(job: string) {
-  await requireRole(["admin", "lma", "kam", "sme"]);
+  await requireRole(["admin", "kam", "lma", "telecaller"]);
   return {
     summary: `${job} sync is not configured in this build — no Google Sheets credentials are set. Manage this data directly in Admin instead.`,
   };

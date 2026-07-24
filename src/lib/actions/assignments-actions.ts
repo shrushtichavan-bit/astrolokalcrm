@@ -40,7 +40,7 @@ function applyAllotmentFilters<
 export async function getUnassignedTelecallerLeads(input: AllotmentFiltersT & { page?: number }) {
   const { page: rawPage, ...rest } = z.object({ ...AllotmentFilters.shape, page: z.number().int().min(0).nullish() }).parse(input);
   const page = rawPage ?? 0;
-  await requireRole("admin");
+  await requireRole(["admin", "kam"]);
 
   const countQ = applyAllotmentFilters(
     supabaseAdmin.from("leads").select("*", { count: "exact", head: true }).is("assigned_to_email", null),
@@ -68,7 +68,7 @@ export async function getUnassignedTelecallerLeads(input: AllotmentFiltersT & { 
 /** Every lead id matching the current filters (not just the current page) — powers "Select all N leads". */
 export async function getUnassignedLeadIds(input: AllotmentFiltersT) {
   const f = AllotmentFilters.parse(input);
-  await requireRole("admin");
+  await requireRole(["admin", "kam"]);
 
   const q = applyAllotmentFilters(
     supabaseAdmin.from("leads").select("id").is("assigned_to_email", null).limit(MAX_MATCHING_IDS),
@@ -83,7 +83,7 @@ export async function getUnassignedLeadIds(input: AllotmentFiltersT) {
 export async function getAssignedTelecallerLeads(input: AllotmentFiltersT & { page?: number }) {
   const { page: rawPage, ...rest } = z.object({ ...AllotmentFilters.shape, page: z.number().int().min(0).nullish() }).parse(input);
   const page = rawPage ?? 0;
-  await requireRole("admin");
+  await requireRole(["admin", "kam"]);
 
   const countQ = applyAllotmentFilters(
     supabaseAdmin.from("leads").select("*", { count: "exact", head: true }).not("assigned_to_email", "is", null),
@@ -118,7 +118,7 @@ export async function getAssignedTelecallerLeads(input: AllotmentFiltersT & { pa
 /** Every lead id matching the current filters (not just the current page) — powers "Select all N leads". */
 export async function getAssignedLeadIds(input: AllotmentFiltersT) {
   const f = AllotmentFilters.parse(input);
-  await requireRole("admin");
+  await requireRole(["admin", "kam"]);
 
   const q = applyAllotmentFilters(
     supabaseAdmin.from("leads").select("id").not("assigned_to_email", "is", null).limit(MAX_MATCHING_IDS),
@@ -137,7 +137,7 @@ export async function assignTelecallerBulk(input: { lead_ids: string[]; telecall
       telecaller_email: z.string().email().max(255),
     })
     .parse(input);
-  const u = await requireRole("admin");
+  const u = await requireRole(["admin", "kam"]);
   const telecaller = data.telecaller_email.toLowerCase();
 
   const { error } = await supabaseAdmin

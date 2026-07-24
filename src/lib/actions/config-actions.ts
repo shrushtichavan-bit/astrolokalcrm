@@ -7,7 +7,7 @@ import { requireRole } from "@/lib/auth";
 const STAGES = ["calling", "round_1", "round_2", "round_3", "round_4", "expert_creation"] as const;
 
 export async function getRoundConfig() {
-  await requireRole("admin");
+  await requireRole(["admin", "kam", "lma"]);
   const [{ data: cfg }, { data: marks }] = await Promise.all([
     supabaseAdmin.from("round_config").select("*").eq("id", 1).maybeSingle(),
     supabaseAdmin.from("round_passing_marks").select("*").order("round_number"),
@@ -31,7 +31,7 @@ export async function upsertRoundConfig(input: {
       passing_marks: z.array(z.object({ round_number: z.number().int().min(1).max(4), passing_marks: z.number().int().min(0) })).min(1).max(4),
     })
     .parse(input);
-  await requireRole("admin");
+  await requireRole(["admin", "kam", "lma"]);
   if (data.rounds_required_for_verdict > data.num_rounds)
     throw new Error("Rounds required for verdict cannot exceed number of rounds");
 
@@ -48,7 +48,7 @@ export async function upsertRoundConfig(input: {
 
 export async function getQuestions(input: { round_number: number }) {
   const { round_number } = z.object({ round_number: z.number().int().min(1).max(4) }).parse(input);
-  await requireRole("admin");
+  await requireRole(["admin", "kam", "lma"]);
   const { data, error } = await supabaseAdmin.from("questions").select("*").eq("round_number", round_number).order("display_order");
   if (error) throw error;
   return { questions: data ?? [] };
@@ -66,7 +66,7 @@ export async function upsertQuestions(input: {
         .max(200),
     })
     .parse(input);
-  await requireRole("admin");
+  await requireRole(["admin", "kam", "lma"]);
   await supabaseAdmin.from("questions").delete().eq("round_number", data.round_number);
   if (data.questions.length > 0) {
     const { error } = await supabaseAdmin.from("questions").insert(
@@ -78,7 +78,7 @@ export async function upsertQuestions(input: {
 }
 
 export async function getStagePools() {
-  await requireRole("admin");
+  await requireRole(["admin", "kam", "lma"]);
   const [{ data: pools }, { data: users }] = await Promise.all([
     supabaseAdmin.from("stage_pools").select("*").order("stage"),
     supabaseAdmin.from("users").select("email, name"),
@@ -89,7 +89,7 @@ export async function getStagePools() {
 
 export async function upsertStagePools(input: { stage: string; eligible_emails: string[] }) {
   const data = z.object({ stage: z.enum(STAGES), eligible_emails: z.array(z.string().email().max(255)).max(500) }).parse(input);
-  await requireRole("admin");
+  await requireRole(["admin", "kam", "lma"]);
   await supabaseAdmin.from("stage_pools").delete().eq("stage", data.stage);
   const rows = Array.from(new Set(data.eligible_emails.map((e) => e.trim().toLowerCase()))).filter(Boolean).map((eligible_email) => ({ stage: data.stage, eligible_email }));
   if (rows.length > 0) {
@@ -102,14 +102,14 @@ export async function upsertStagePools(input: { stage: string; eligible_emails: 
 // ---------- Dedup settings ----------
 
 export async function getCrmSettings() {
-  await requireRole("admin");
+  await requireRole(["admin", "kam", "lma"]);
   const { data } = await supabaseAdmin.from("crm_settings").select("*").eq("id", 1).maybeSingle();
   return { cooldown_days: data?.cooldown_days ?? 60 };
 }
 
 export async function upsertCrmSettings(input: { cooldown_days: number }) {
   const { cooldown_days } = z.object({ cooldown_days: z.number().int().min(0).max(3650) }).parse(input);
-  await requireRole("admin");
+  await requireRole(["admin", "kam", "lma"]);
   const { error } = await supabaseAdmin
     .from("crm_settings")
     .upsert({ id: 1, cooldown_days, updated_at: new Date().toISOString() });

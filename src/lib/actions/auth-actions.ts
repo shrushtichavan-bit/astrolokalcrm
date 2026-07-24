@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { verifyPassword, signSession, setSessionCookie, clearSessionCookie } from "@/lib/auth";
+import { verifyPassword, signSession, setSessionCookie, clearSessionCookie, type Role } from "@/lib/auth";
 
 const LoginSchema = z.object({
   email: z.string().email(),
@@ -23,7 +23,7 @@ export async function login(input: { email: string; password: string }) {
     id: user.id,
     email: user.email,
     name: user.name,
-    role: user.role as "admin" | "lma" | "kam" | "sme",
+    role: user.role as Role,
   });
   await setSessionCookie(token);
   return { ok: true as const };

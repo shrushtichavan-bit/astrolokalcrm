@@ -3,7 +3,6 @@
 import { z } from "zod";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { requireRole, requireUser } from "@/lib/auth";
-import { loadRoundConfig } from "@/lib/helpers";
 
 const DateFilterSchema = z.object({ from: z.string().nullish(), to: z.string().nullish() });
 type DateFilterT = z.infer<typeof DateFilterSchema>;
@@ -27,29 +26,31 @@ type OwnedLead = {
   current_stage: string;
 };
 
-// ============================================================
-// Universal team member dashboard (lma / kam / sme — any role,
-// keyed purely off current_owner_email so a user sees every lead
-// assigned to them regardless of role label)
-// ============================================================
-
-export async function getTeamDashboard(input: DateFilterT) {
-  const f = DateFilterSchema.parse(input);
-  const u = await requireUser();
-  const me = u.email;
+async function loadOwnedInRange(me: string, f: DateFilterT): Promise<OwnedLead[]> {
   const inRange = inRangeFn(f);
-  const { num_rounds } = await loadRoundConfig();
-
   const { data: owned } = await supabaseAdmin
     .from("leads")
     .select("id, lead_id, name, contact, source, lead_date, current_stage")
     .eq("current_owner_email", me)
     .limit(1000);
-  const ownedInRange = ((owned ?? []) as OwnedLead[]).filter((l) => inRange(l.lead_date));
+  return ((owned ?? []) as OwnedLead[]).filter((l) => inRange(l.lead_date));
+}
 
-  // ---- Pending: calling stage split by next attempt number ----
+// ============================================================
+// Telecaller dashboard — calling attempts only. Snapshot cards for
+// Attempt 1/2/3 always render, even at 0 pending / 0 done.
+// ============================================================
+
+export async function getTelecallerDashboard(input: DateFilterT) {
+  const f = DateFilterSchema.parse(input);
+  const u = await requireUser();
+  const me = u.email;
+  const inRange = inRangeFn(f);
+
+  const ownedInRange = await loadOwnedInRange(me, f);
   const callingLeads = ownedInRange.filter((l) => l.current_stage === "calling_pending");
   const callingLeadIds = callingLeads.map((l) => l.id);
+
   const { data: attemptsForCalling } = callingLeadIds.length
     ? await supabaseAdmin.from("call_attempts").select("lead_id, attempt_number").in("lead_id", callingLeadIds)
     : { data: [] as { lead_id: string; attempt_number: number }[] };
@@ -70,22 +71,64 @@ export async function getTeamDashboard(input: DateFilterT) {
     const bucket = attemptBuckets.get(n) ?? [];
     if (bucket.length) pendingGroups.push({ key: `attempt_${n}`, label: `Attempt ${n}`, leads: bucket });
   }
-  const roundPendingBuckets = new Map<number, OwnedLead[]>();
-  for (let n = 1; n <= num_rounds; n++) {
-    const bucket = ownedInRange.filter((l) => l.current_stage === `round_${n}_pending`);
-    roundPendingBuckets.set(n, bucket);
-    if (bucket.length) pendingGroups.push({ key: `round_${n}`, label: `Round ${n}`, leads: bucket });
-  }
-  const expertBucket = ownedInRange.filter((l) => l.current_stage === "profile_creation_pending");
-  if (expertBucket.length) pendingGroups.push({ key: "expert_creation", label: "Expert Creation", leads: expertBucket });
-
   const pendingTotal = pendingGroups.reduce((s, g) => s + g.leads.length, 0);
 
-  // ---- "Done" work by this user, for stat-card done-counts + Done section ----
+  // "Done" — calls this user made, for done-counts + the Done section.
   const { data: myAttemptsRaw } = await supabaseAdmin
     .from("call_attempts")
     .select("lead_id, attempt_number, outcome")
     .eq("attempted_by", me);
+  const relatedLeadIds = Array.from(new Set((myAttemptsRaw ?? []).map((a) => a.lead_id)));
+  const { data: relatedLeadsInfo } = relatedLeadIds.length
+    ? await supabaseAdmin.from("leads").select("id, lead_id, name, contact, source, lead_date").in("id", relatedLeadIds)
+    : { data: [] as OwnedLead[] };
+  const relatedLeadById = new Map((relatedLeadsInfo ?? []).map((l) => [l.id, l]));
+  const myAttempts = (myAttemptsRaw ?? []).filter((a) => {
+    const lead = relatedLeadById.get(a.lead_id);
+    return lead ? inRange(lead.lead_date) : false;
+  });
+
+  const attemptDoneCounts = new Map<number, number>();
+  for (const a of myAttempts) attemptDoneCounts.set(a.attempt_number, (attemptDoneCounts.get(a.attempt_number) ?? 0) + 1);
+  const connectedLeadIds = new Set(myAttempts.filter((a) => a.outcome === "connected").map((a) => a.lead_id));
+
+  // Snapshot cards always render — never hidden or conditional on data.
+  const stats = [1, 2, 3].map((n) => ({
+    key: `attempt_${n}`,
+    label: `Attempt ${n}`,
+    pending: attemptBuckets.get(n)?.length ?? 0,
+    done: attemptDoneCounts.get(n) ?? 0,
+  }));
+
+  const doneLeads = Array.from(connectedLeadIds)
+    .map((id) => relatedLeadById.get(id))
+    .filter((l): l is OwnedLead => Boolean(l));
+
+  return { pendingTotal, stats, pendingGroups, doneLeads };
+}
+
+// ============================================================
+// LMA dashboard — Round 1, Round 2, and Expert Profile Creation.
+// Snapshot cards always render, even at 0 pending / 0 done.
+// ============================================================
+
+export async function getLmaDashboard(input: DateFilterT) {
+  const f = DateFilterSchema.parse(input);
+  const u = await requireUser();
+  const me = u.email;
+  const inRange = inRangeFn(f);
+
+  const ownedInRange = await loadOwnedInRange(me, f);
+  const round1Pending = ownedInRange.filter((l) => l.current_stage === "round_1_pending");
+  const round2Pending = ownedInRange.filter((l) => l.current_stage === "round_2_pending");
+  const expertPending = ownedInRange.filter((l) => l.current_stage === "profile_creation_pending");
+
+  const pendingGroups: Array<{ key: string; label: string; leads: OwnedLead[] }> = [];
+  if (round1Pending.length) pendingGroups.push({ key: "round_1", label: "Round 1", leads: round1Pending });
+  if (round2Pending.length) pendingGroups.push({ key: "round_2", label: "Round 2", leads: round2Pending });
+  if (expertPending.length) pendingGroups.push({ key: "expert_creation", label: "Expert Creation", leads: expertPending });
+  const pendingTotal = pendingGroups.reduce((s, g) => s + g.leads.length, 0);
+
   const { data: myRoundsRaw } = await supabaseAdmin
     .from("interview_rounds")
     .select("lead_id, round_number, passed")
@@ -94,11 +137,7 @@ export async function getTeamDashboard(input: DateFilterT) {
   const { data: myProfilesRaw } = await supabaseAdmin.from("expert_profiles").select("lead_id").eq("linked_by", me);
 
   const relatedLeadIds = Array.from(
-    new Set([
-      ...(myAttemptsRaw ?? []).map((a) => a.lead_id),
-      ...(myRoundsRaw ?? []).map((r) => r.lead_id),
-      ...(myProfilesRaw ?? []).map((p) => p.lead_id),
-    ]),
+    new Set([...(myRoundsRaw ?? []).map((r) => r.lead_id), ...(myProfilesRaw ?? []).map((p) => p.lead_id)]),
   );
   const { data: relatedLeadsInfo } = relatedLeadIds.length
     ? await supabaseAdmin.from("leads").select("id, lead_id, name, contact, source, lead_date").in("id", relatedLeadIds)
@@ -109,66 +148,108 @@ export async function getTeamDashboard(input: DateFilterT) {
     return lead ? inRange(lead.lead_date) : false;
   };
 
-  const myAttempts = (myAttemptsRaw ?? []).filter((a) => relatedInRange(a.lead_id));
   const myRounds = (myRoundsRaw ?? []).filter((r) => relatedInRange(r.lead_id));
   const myProfiles = (myProfilesRaw ?? []).filter((p) => relatedInRange(p.lead_id));
 
-  const attemptDoneCounts = new Map<number, number>();
-  for (const a of myAttempts) attemptDoneCounts.set(a.attempt_number, (attemptDoneCounts.get(a.attempt_number) ?? 0) + 1);
-  const connectedLeadIds = new Set(myAttempts.filter((a) => a.outcome === "connected").map((a) => a.lead_id));
-
-  const roundDoneCounts = new Map<number, number>();
-  for (const r of myRounds) roundDoneCounts.set(r.round_number, (roundDoneCounts.get(r.round_number) ?? 0) + 1);
+  const round1Done = myRounds.filter((r) => r.round_number === 1).length;
+  const round2Done = myRounds.filter((r) => r.round_number === 2).length;
   const passedRoundLeadIds = new Set(myRounds.filter((r) => r.passed === true).map((r) => r.lead_id));
-
   const createdLeadIds = new Set(myProfiles.map((p) => p.lead_id));
 
-  // ---- Stat cards: only for stage groups this user actually touches ----
-  const stats: Array<{ key: string; label: string; pending: number; done: number }> = [];
-  const hasCallingWork = callingLeads.length > 0 || myAttempts.length > 0;
-  if (hasCallingWork) {
-    for (const n of [1, 2, 3]) {
-      stats.push({ key: `attempt_${n}`, label: `Attempt ${n}`, pending: attemptBuckets.get(n)?.length ?? 0, done: attemptDoneCounts.get(n) ?? 0 });
-    }
-  }
-  const hasRoundWork = Array.from(roundPendingBuckets.values()).some((b) => b.length > 0) || myRounds.length > 0;
-  if (hasRoundWork) {
-    for (let n = 1; n <= num_rounds; n++) {
-      stats.push({ key: `round_${n}`, label: `Round ${n}`, pending: roundPendingBuckets.get(n)?.length ?? 0, done: roundDoneCounts.get(n) ?? 0 });
-    }
-  }
-  const hasExpertWork = expertBucket.length > 0 || myProfiles.length > 0;
-  if (hasExpertWork) {
-    stats.push({ key: "expert_creation", label: "Expert Creation", pending: expertBucket.length, done: createdLeadIds.size });
-  }
+  // Snapshot cards always render — never hidden or conditional on data.
+  const stats = [
+    { key: "round_1", label: "Round 1", pending: round1Pending.length, done: round1Done },
+    { key: "round_2", label: "Round 2", pending: round2Pending.length, done: round2Done },
+    { key: "expert_creation", label: "Expert Creation", pending: expertPending.length, done: createdLeadIds.size },
+  ];
 
-  // ---- Done section: union of leads this user connected / passed / created a profile for ----
-  const doneLeadIds = new Set<string>([...connectedLeadIds, ...passedRoundLeadIds, ...createdLeadIds]);
+  const doneLeadIds = new Set<string>([...passedRoundLeadIds, ...createdLeadIds]);
   const doneLeads = Array.from(doneLeadIds)
     .map((id) => relatedLeadById.get(id))
     .filter((l): l is OwnedLead => Boolean(l));
 
-  return {
-    pendingTotal,
-    stats,
-    pendingGroups,
-    doneLeads,
-  };
+  return { pendingTotal, stats, pendingGroups, doneLeads };
 }
 
 // ============================================================
-// Admin dashboard extras: current-snapshot calling-pending count
-// + unassigned-leads panel data, both date-filterable by lead_date
+// Admin / KAM dashboard — identical view for both roles. 5 pipeline-wide
+// snapshot cards, always rendered regardless of counts.
+// ============================================================
+
+export async function getPipelineSnapshot(input: DateFilterT) {
+  const f = DateFilterSchema.parse(input);
+  await requireRole(["admin", "kam"]);
+
+  let leadsQ = supabaseAdmin.from("leads").select("id, current_stage");
+  if (f.from) leadsQ = leadsQ.gte("lead_date", f.from);
+  if (f.to) leadsQ = leadsQ.lte("lead_date", f.to);
+  const { data: leads } = await leadsQ;
+
+  const stageCounts = new Map<string, number>();
+  const idsInRange = new Set<string>();
+  for (const l of leads ?? []) {
+    idsInRange.add(l.id);
+    stageCounts.set(l.current_stage, (stageCounts.get(l.current_stage) ?? 0) + 1);
+  }
+
+  const [{ data: connected }, { data: r1 }, { data: r2 }, { data: profiles }] = await Promise.all([
+    supabaseAdmin.from("calling_status").select("lead_id").eq("status", "connected"),
+    supabaseAdmin.from("interview_rounds").select("lead_id").eq("round_number", 1).not("submitted_at", "is", null),
+    supabaseAdmin.from("interview_rounds").select("lead_id").eq("round_number", 2).not("submitted_at", "is", null),
+    supabaseAdmin.from("expert_profiles").select("lead_id"),
+  ]);
+  const countInRange = (rows: Array<{ lead_id: string }> | null) => (rows ?? []).filter((r) => idsInRange.has(r.lead_id)).length;
+
+  const cards = [
+    {
+      key: "calling",
+      label: "Calling Pipeline",
+      pending: stageCounts.get("calling_pending") ?? 0,
+      done: countInRange(connected),
+      href: "/admin/leads?stage=calling_pending",
+    },
+    {
+      key: "round_1",
+      label: "Round 1",
+      pending: stageCounts.get("round_1_pending") ?? 0,
+      done: countInRange(r1),
+      href: "/admin/leads?stage=round_1_pending",
+    },
+    {
+      key: "round_2",
+      label: "Round 2",
+      pending: stageCounts.get("round_2_pending") ?? 0,
+      done: countInRange(r2),
+      href: "/admin/leads?stage=round_2_pending",
+    },
+    {
+      key: "expert_creation",
+      label: "Expert Creation",
+      pending: stageCounts.get("profile_creation_pending") ?? 0,
+      done: countInRange(profiles),
+      href: "/admin/leads?stage=profile_creation_pending",
+    },
+    {
+      key: "active_experts",
+      label: "Active Experts",
+      pending: stageCounts.get("profile_created") ?? 0,
+      done: stageCounts.get("active") ?? 0,
+      href: "/admin/leads?stage=active",
+    },
+  ];
+
+  return { cards };
+}
+
+// ============================================================
+// Admin dashboard extras: unassigned-leads panel data, date-filterable
+// by lead_date. (The calling-pending snapshot now lives in
+// getPipelineSnapshot's "Calling Pipeline" card.)
 // ============================================================
 
 export async function getAdminDashboardExtras(input: DateFilterT) {
   const f = DateFilterSchema.parse(input);
-  await requireRole("admin");
-
-  let callingQ = supabaseAdmin.from("leads").select("*", { count: "exact", head: true }).eq("current_stage", "calling_pending");
-  if (f.from) callingQ = callingQ.gte("lead_date", f.from);
-  if (f.to) callingQ = callingQ.lte("lead_date", f.to);
-  const { count: callingPending } = await callingQ;
+  await requireRole(["admin", "kam"]);
 
   let unassignedCountQ = supabaseAdmin.from("leads").select("*", { count: "exact", head: true }).is("assigned_to_email", null);
   if (f.from) unassignedCountQ = unassignedCountQ.gte("lead_date", f.from);
@@ -187,7 +268,6 @@ export async function getAdminDashboardExtras(input: DateFilterT) {
   const { data: topUnassigned } = await topUnassignedQ;
 
   return {
-    calling_pending: callingPending ?? 0,
     unassigned_count: unassignedCount ?? 0,
     top_unassigned: topUnassigned ?? [],
   };

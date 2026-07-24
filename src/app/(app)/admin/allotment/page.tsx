@@ -229,7 +229,7 @@ function UnassignedTab() {
 
   const sourcesQ = useQuery({ queryKey: ["active-sources"], queryFn: () => listActiveSources() });
   const peopleQ = useQuery({ queryKey: ["admin-people"], queryFn: () => listAllPeople(), staleTime: 5 * 60_000 });
-  const telecallers = React.useMemo(() => (peopleQ.data?.people ?? []).filter((p) => p.role === "lma"), [peopleQ.data]);
+  const telecallers = React.useMemo(() => (peopleQ.data?.people ?? []).filter((p) => p.role === "telecaller"), [peopleQ.data]);
 
   const q = useQuery({
     queryKey: ["admin-unassigned-leads", filterState.filters, page],
@@ -389,7 +389,7 @@ function AssignedTab() {
 
   const sourcesQ = useQuery({ queryKey: ["active-sources"], queryFn: () => listActiveSources() });
   const peopleQ = useQuery({ queryKey: ["admin-people"], queryFn: () => listAllPeople(), staleTime: 5 * 60_000 });
-  const telecallers = React.useMemo(() => (peopleQ.data?.people ?? []).filter((p) => p.role === "lma"), [peopleQ.data]);
+  const telecallers = React.useMemo(() => (peopleQ.data?.people ?? []).filter((p) => p.role === "telecaller"), [peopleQ.data]);
 
   const q = useQuery({
     queryKey: ["admin-assigned-leads", filterState.filters, page],

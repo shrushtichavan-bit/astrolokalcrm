@@ -4,7 +4,7 @@ import { z } from "zod";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { hashPassword, requireRole } from "@/lib/auth";
 
-const VALID_ROLES = ["lma", "kam", "sme", "admin"] as const;
+const VALID_ROLES = ["admin", "kam", "lma", "telecaller"] as const;
 
 export async function listUsers() {
   await requireRole("admin");

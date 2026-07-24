@@ -55,7 +55,7 @@ async function leadsMatchingFilters(f: Filters): Promise<Set<string> | null> {
 
 export async function getAdminFunnel(input: Filters) {
   const f = FiltersSchema.parse(input);
-  await requireRole("admin");
+  await requireRole(["admin", "kam"]);
   const numRounds = await loadNumRounds();
   const filterIds = await leadsMatchingFilters(f);
 
@@ -486,6 +486,13 @@ type ListRow = {
   round_1_assignee: string;
   round_2_assignee: string;
   expert_creation_assignee: string;
+  attempt_1_outcome: string;
+  attempt_2_outcome: string;
+  attempt_3_outcome: string;
+  r1_result: "passed" | "failed" | "";
+  r1_interviewer: string;
+  r2_result: "passed" | "failed" | "";
+  r2_interviewer: string;
 };
 
 function roundLabel(r: { passed: boolean | null; submitted_at: string | null } | undefined): string {
@@ -499,17 +506,18 @@ function roundLabel(r: { passed: boolean | null; submitted_at: string | null } |
 async function enrichLeads(leads: Array<Record<string, unknown>>): Promise<ListRow[]> {
   if (leads.length === 0) return [];
   const ids = leads.map((l) => l.id as string);
-  const [{ data: cs }, { data: rounds }, { data: assignments }, { data: users }] = await Promise.all([
+  const [{ data: cs }, { data: rounds }, { data: assignments }, { data: users }, { data: attempts }] = await Promise.all([
     supabaseAdmin.from("calling_status").select("lead_id, status").in("lead_id", ids),
-    supabaseAdmin.from("interview_rounds").select("lead_id, round_number, passed, submitted_at").in("lead_id", ids).in("round_number", [1, 2]),
+    supabaseAdmin.from("interview_rounds").select("lead_id, round_number, passed, submitted_at, conducted_by").in("lead_id", ids).in("round_number", [1, 2]),
     supabaseAdmin.from("lead_stage_assignments").select("lead_id, stage, assigned_email").in("lead_id", ids),
     supabaseAdmin.from("users").select("email, name"),
+    supabaseAdmin.from("call_attempts").select("lead_id, attempt_number, outcome").in("lead_id", ids),
   ]);
   const nameByEmail = new Map((users ?? []).map((u) => [u.email, u.name]));
   const resolve = (email: string | null | undefined) => (email ? (nameByEmail.get(email) ?? email) : "—");
   const csBy = new Map((cs ?? []).map((s) => [s.lead_id, s]));
-  const r1By = new Map<string, { passed: boolean | null; submitted_at: string | null }>();
-  const r2By = new Map<string, { passed: boolean | null; submitted_at: string | null }>();
+  const r1By = new Map<string, { passed: boolean | null; submitted_at: string | null; conducted_by: string }>();
+  const r2By = new Map<string, { passed: boolean | null; submitted_at: string | null; conducted_by: string }>();
   for (const r of rounds ?? []) {
     if (r.round_number === 1) r1By.set(r.lead_id, r);
     else if (r.round_number === 2) r2By.set(r.lead_id, r);
@@ -520,6 +528,14 @@ async function enrichLeads(leads: Array<Record<string, unknown>>): Promise<ListR
     m[a.stage] = a.assigned_email;
     chainBy.set(a.lead_id, m);
   }
+  const attemptsBy = new Map<string, Record<number, string>>();
+  for (const a of attempts ?? []) {
+    const m = attemptsBy.get(a.lead_id) ?? {};
+    m[a.attempt_number] = a.outcome ?? "";
+    attemptsBy.set(a.lead_id, m);
+  }
+  const roundResult = (r: { passed: boolean | null } | undefined): "passed" | "failed" | "" =>
+    r?.passed === true ? "passed" : r?.passed === false ? "failed" : "";
 
   return leads.map((l) => {
     const id = l.id as string;
@@ -527,6 +543,7 @@ async function enrichLeads(leads: Array<Record<string, unknown>>): Promise<ListR
     const r1 = r1By.get(id);
     const r2 = r2By.get(id);
     const chain = chainBy.get(id) ?? {};
+    const attemptOutcomes = attemptsBy.get(id) ?? {};
     const verdict =
       stage === "active" || stage === "profile_created" || stage === "profile_creation_pending"
         ? "Passed"
@@ -551,13 +568,20 @@ async function enrichLeads(leads: Array<Record<string, unknown>>): Promise<ListR
       round_1_assignee: resolve(chain.round_1),
       round_2_assignee: resolve(chain.round_2),
       expert_creation_assignee: resolve(chain.expert_creation),
+      attempt_1_outcome: attemptOutcomes[1] ?? "",
+      attempt_2_outcome: attemptOutcomes[2] ?? "",
+      attempt_3_outcome: attemptOutcomes[3] ?? "",
+      r1_result: roundResult(r1),
+      r1_interviewer: r1?.conducted_by ? resolve(r1.conducted_by) : "",
+      r2_result: roundResult(r2),
+      r2_interviewer: r2?.conducted_by ? resolve(r2.conducted_by) : "",
     };
   });
 }
 
 export async function listAllLeads(input: AllLeadsFilterT) {
   const f = AllLeadsFilter.parse(input);
-  await requireRole("admin");
+  await requireRole(["admin", "kam", "lma"]);
   const numRounds = await loadNumRounds();
   const limit = f.limit ?? 100;
   const { leads, total } = await queryLeadsPage(f, limit);
@@ -575,7 +599,7 @@ export async function listAllLeads(input: AllLeadsFilterT) {
 
 export async function exportLeadsCsv(input: AllLeadsFilterT) {
   const f = AllLeadsFilter.parse(input);
-  await requireRole("admin");
+  await requireRole(["admin", "kam", "lma"]);
   const esc = (v: unknown) => {
     const s = v == null ? "" : String(v);
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -618,14 +642,14 @@ export async function exportLeadsCsv(input: AllLeadsFilterT) {
 }
 
 export async function listAllPeople() {
-  await requireRole("admin");
+  await requireRole(["admin", "kam", "lma"]);
   const { data } = await supabaseAdmin.from("users").select("email, name, role").order("name");
   return { people: data ?? [] };
 }
 
 export async function getRecentActivity(input: DateOnlyT = {}) {
   const f = DateOnly.parse(input);
-  await requireRole("admin");
+  await requireRole(["admin", "kam"]);
   const hasDateFilter = Boolean(f.from || f.to);
 
   const { data, error } = await supabaseAdmin

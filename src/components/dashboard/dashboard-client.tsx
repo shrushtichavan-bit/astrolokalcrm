@@ -3,19 +3,15 @@
 import * as React from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
+import { AlertTriangle, ListChecks, UserPlus, Settings2, ArrowRight, ChevronDown } from "lucide-react";
+import { getRecentActivity } from "@/lib/actions/admin-actions";
 import {
-  AlertTriangle,
-  ListChecks,
-  UserPlus,
-  Settings2,
-  ArrowRight,
-  ChevronDown,
-  CheckCircle2,
-} from "lucide-react";
-import { getAdminFunnel, getRecentActivity } from "@/lib/actions/admin-actions";
-import { getTeamDashboard, getAdminDashboardExtras } from "@/lib/actions/dashboard-actions";
+  getTelecallerDashboard,
+  getLmaDashboard,
+  getPipelineSnapshot,
+  getAdminDashboardExtras,
+} from "@/lib/actions/dashboard-actions";
 import type { ShellUser } from "@/components/app-shell";
-import { EmptyState } from "@/components/empty-state";
 import { PriorityBadge } from "@/components/priority-badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -26,6 +22,11 @@ import { cn } from "@/lib/utils";
 
 type DateFilter = { from: string | null; to: string | null };
 const NO_FILTER: DateFilter = { from: null, to: null };
+
+type PendingDoneStat = { key: string; label: string; pending: number; done: number };
+type LeadRow = { id: string; lead_id: string; name: string; contact: string; source: string | null; lead_date: string | null };
+type PendingGroup = { key: string; label: string; leads: LeadRow[] };
+type RoleDashboardData = { pendingTotal: number; stats: PendingDoneStat[]; pendingGroups: PendingGroup[]; doneLeads: LeadRow[] };
 
 function formatContact(c: string): string {
   const digits = (c ?? "").replace(/\D/g, "");
@@ -89,8 +90,6 @@ function DateRangeFilter({ onApply }: { onApply: (f: DateFilter) => void }) {
   );
 }
 
-type LeadRow = { id: string; lead_id: string; name: string; contact: string; source: string | null; lead_date: string | null };
-
 function LeadRowsTable({ leads }: { leads: LeadRow[] }) {
   return (
     <Table>
@@ -124,37 +123,44 @@ function LeadRowsTable({ leads }: { leads: LeadRow[] }) {
   );
 }
 
-export function DashboardClient({ user }: { user: ShellUser }) {
-  if (user.role === "admin") return <AdminDashboard user={user} />;
-  return <TeamDashboard user={user} />;
+/** A snapshot stat card showing a Pending (orange) / Done (green) pair. Always renders, even at 0/0. */
+function StatCard({ stat }: { stat: PendingDoneStat }) {
+  return (
+    <Card className="w-44 shrink-0">
+      <CardContent className="p-4">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{stat.label}</p>
+        <div className="mt-2 flex items-baseline gap-5">
+          <div>
+            <p className="text-xl font-bold tabular-nums text-primary">{stat.pending}</p>
+            <p className="text-[11px] text-muted-foreground">Pending</p>
+          </div>
+          <div>
+            <p className="text-xl font-bold tabular-nums text-success">{stat.done}</p>
+            <p className="text-[11px] text-muted-foreground">Done</p>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
-/* ===================== ADMIN ===================== */
+export function DashboardClient({ user }: { user: ShellUser }) {
+  if (user.role === "admin" || user.role === "kam") return <AdminDashboard user={user} />;
+  if (user.role === "lma") return <LmaDashboard user={user} />;
+  return <TelecallerDashboard user={user} />;
+}
+
+/* ===================== ADMIN / KAM (identical view) ===================== */
 
 function AdminDashboard({ user }: { user: ShellUser }) {
   const [dateFilter, setDateFilter] = React.useState<DateFilter>(NO_FILTER);
 
-  const funnelQ = useQuery({ queryKey: ["dashboard-funnel", dateFilter], queryFn: () => getAdminFunnel(dateFilter) });
+  const snapshotQ = useQuery({ queryKey: ["dashboard-pipeline-snapshot", dateFilter], queryFn: () => getPipelineSnapshot(dateFilter) });
   const extrasQ = useQuery({ queryKey: ["dashboard-admin-extras", dateFilter], queryFn: () => getAdminDashboardExtras(dateFilter) });
   const activityQ = useQuery({ queryKey: ["dashboard-activity", dateFilter], queryFn: () => getRecentActivity(dateFilter) });
 
-  const funnelRowByKey = new Map((funnelQ.data?.rows ?? []).map((r) => [r.key, r]));
-  const numRounds = funnelQ.data?.num_rounds ?? 2;
   const unassignedCount = extrasQ.data?.unassigned_count ?? 0;
-
-  const funnelCards: Array<{ label: string; count: number; pct: number | null; href: string }> = [];
-  funnelCards.push({ label: "Total", count: funnelRowByKey.get("uploaded")?.count ?? 0, pct: null, href: "/admin/leads" });
-  funnelCards.push({ label: "Calling Pending", count: extrasQ.data?.calling_pending ?? 0, pct: null, href: "/admin/leads?stage=calling_pending" });
-  const connectedRow = funnelRowByKey.get("connected");
-  funnelCards.push({ label: "Connected", count: connectedRow?.count ?? 0, pct: connectedRow?.pct ?? null, href: "/admin/leads?status=connected" });
-  for (let n = 1; n <= numRounds; n++) {
-    const r = funnelRowByKey.get(`round_${n}_done`);
-    funnelCards.push({ label: `Round ${n}`, count: r?.count ?? 0, pct: r?.pct ?? null, href: `/admin/leads?stage=round_${n}_pending` });
-  }
-  const profileRow = funnelRowByKey.get("profile_created");
-  funnelCards.push({ label: "Expert Creation", count: profileRow?.count ?? 0, pct: profileRow?.pct ?? null, href: "/admin/leads?stage=profile_creation_pending" });
-  const activeRow = funnelRowByKey.get("active");
-  funnelCards.push({ label: "Active", count: activeRow?.count ?? 0, pct: activeRow?.pct ?? null, href: "/admin/leads?stage=active" });
+  const cards = snapshotQ.data?.cards ?? [];
 
   return (
     <div>
@@ -184,23 +190,17 @@ function AdminDashboard({ user }: { user: ShellUser }) {
         </div>
       )}
 
-      {funnelQ.isLoading ? (
-        <div className="flex gap-3 overflow-x-auto pb-2">
-          {Array.from({ length: 7 }).map((_, i) => (
-            <div key={i} className="h-24 w-40 shrink-0 animate-pulse rounded-lg bg-muted" />
+      {snapshotQ.isLoading ? (
+        <div className="mb-6 flex gap-3 overflow-x-auto pb-2">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="h-24 w-44 shrink-0 animate-pulse rounded-lg bg-muted" />
           ))}
         </div>
       ) : (
         <div className="mb-6 flex gap-3 overflow-x-auto pb-2">
-          {funnelCards.map((c) => (
-            <Link key={c.label} href={c.href} className="shrink-0">
-              <Card className="w-40 transition-shadow hover:shadow-md">
-                <CardContent className="p-4">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{c.label}</p>
-                  <p className="mt-1 text-xl font-bold tabular-nums text-foreground">{c.count.toLocaleString()}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">{c.pct != null ? `${c.pct}% conversion` : " "}</p>
-                </CardContent>
-              </Card>
+          {cards.map((c) => (
+            <Link key={c.key} href={c.href} className="shrink-0">
+              <StatCard stat={c} />
             </Link>
           ))}
         </div>
@@ -284,11 +284,19 @@ function AdminDashboard({ user }: { user: ShellUser }) {
   );
 }
 
-/* ===================== UNIVERSAL TEAM MEMBER DASHBOARD ===================== */
+/* ===================== SHARED: TELECALLER / LMA (fixed snapshot cards) ===================== */
 
-function TeamDashboard({ user }: { user: ShellUser }) {
+function RolePendingDoneDashboard({
+  user,
+  queryKey,
+  queryFn,
+}: {
+  user: ShellUser;
+  queryKey: string;
+  queryFn: (f: DateFilter) => Promise<RoleDashboardData>;
+}) {
   const [dateFilter, setDateFilter] = React.useState<DateFilter>(NO_FILTER);
-  const q = useQuery({ queryKey: ["dashboard-team", dateFilter], queryFn: () => getTeamDashboard(dateFilter) });
+  const q = useQuery({ queryKey: [queryKey, dateFilter], queryFn: () => queryFn(dateFilter) });
   const [openGroups, setOpenGroups] = React.useState<Record<string, boolean>>({});
   const [doneOpen, setDoneOpen] = React.useState(false);
 
@@ -296,7 +304,6 @@ function TeamDashboard({ user }: { user: ShellUser }) {
   const pendingGroups = q.data?.pendingGroups ?? [];
   const doneLeads = q.data?.doneLeads ?? [];
   const pendingTotal = q.data?.pendingTotal ?? 0;
-  const nothingAtAll = !q.isLoading && pendingTotal === 0 && doneLeads.length === 0 && stats.length === 0;
 
   function isGroupOpen(key: string) {
     return openGroups[key] ?? true;
@@ -318,35 +325,19 @@ function TeamDashboard({ user }: { user: ShellUser }) {
       <DateRangeFilter onApply={setDateFilter} />
 
       {q.isLoading ? (
-        <div className="space-y-3">
-          {Array.from({ length: 3 }).map((_, i) => <div key={i} className="h-20 animate-pulse rounded-lg bg-muted" />)}
+        <div className="mb-8 flex gap-3 overflow-x-auto pb-2">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="h-24 w-44 shrink-0 animate-pulse rounded-lg bg-muted" />
+          ))}
         </div>
-      ) : nothingAtAll ? (
-        <EmptyState icon={CheckCircle2} title="All caught up!" description="Nothing assigned right now." />
       ) : (
-        <>
-          {stats.length > 0 && (
-            <div className="mb-8 flex gap-3 overflow-x-auto pb-2">
-              {stats.map((s) => (
-                <Card key={s.key} className="w-44 shrink-0">
-                  <CardContent className="p-4">
-                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{s.label}</p>
-                    <div className="mt-2 flex items-baseline gap-5">
-                      <div>
-                        <p className="text-xl font-bold tabular-nums text-primary">{s.pending}</p>
-                        <p className="text-[11px] text-muted-foreground">Pending</p>
-                      </div>
-                      <div>
-                        <p className="text-xl font-bold tabular-nums text-success">{s.done}</p>
-                        <p className="text-[11px] text-muted-foreground">Done</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
+        <div className="mb-8 flex gap-3 overflow-x-auto pb-2">
+          {stats.map((s) => <StatCard key={s.key} stat={s} />)}
+        </div>
+      )}
 
+      {!q.isLoading && (
+        <>
           <h2 className="mb-3 text-sm font-semibold text-foreground">Pending</h2>
           {pendingGroups.length === 0 ? (
             <p className="mb-8 text-sm text-muted-foreground">Nothing pending in this range.</p>
@@ -388,4 +379,12 @@ function TeamDashboard({ user }: { user: ShellUser }) {
       )}
     </div>
   );
+}
+
+function TelecallerDashboard({ user }: { user: ShellUser }) {
+  return <RolePendingDoneDashboard user={user} queryKey="dashboard-telecaller" queryFn={getTelecallerDashboard} />;
+}
+
+function LmaDashboard({ user }: { user: ShellUser }) {
+  return <RolePendingDoneDashboard user={user} queryKey="dashboard-lma" queryFn={getLmaDashboard} />;
 }

@@ -17,7 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 
-const ROLES = ["lma", "kam", "sme", "admin"] as const;
+const ROLES = ["admin", "kam", "lma", "telecaller"] as const;
 type EditState = { id: string | null; name: string; email: string; role: string; password: string };
 
 export default function TeamPage() {

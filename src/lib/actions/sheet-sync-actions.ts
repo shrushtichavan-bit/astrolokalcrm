@@ -29,7 +29,7 @@ function extractSpreadsheetId(formUrl: string): string | null {
 }
 
 export async function getSyncableSources() {
-  await requireRole("admin");
+  await requireRole(["admin", "kam", "lma"]);
   const { data, error } = await supabaseAdmin
     .from("source_priority_config")
     .select("source_name, form_url")
@@ -52,7 +52,7 @@ type SourceSyncResult =
 /** Reads one source's Google Sheet via the Sheets API and syncs every row through intake-lead. */
 export async function syncOneSource(input: { source_name: string; form_url: string }): Promise<SourceSyncResult> {
   const data = z.object({ source_name: z.string().min(1), form_url: z.string().min(1) }).parse(input);
-  await requireRole("admin");
+  await requireRole(["admin", "kam", "lma"]);
 
   const sheetsApiKey = process.env.GOOGLE_SHEETS_API_KEY;
   if (!sheetsApiKey) return { ok: false, error: "Missing GOOGLE_SHEETS_API_KEY environment variable." };

@@ -410,7 +410,7 @@ export async function activateExpertProfile(input: { lead_id: string }) {
 
 // ---------- Lead intake (any role — manual, CSV bulk) ----------
 
-const INTAKE_ROLES: Role[] = ["admin", "lma", "kam", "sme"];
+const INTAKE_ROLES: Role[] = ["admin", "kam", "lma", "telecaller"];
 
 export async function resolvePriority(source: string, override?: number | null): Promise<number> {
   if (override != null) return override;

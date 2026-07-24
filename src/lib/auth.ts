@@ -6,7 +6,7 @@ import { cookies } from "next/headers";
 const COOKIE_NAME = "astrolokal_session";
 const ALG = "HS256";
 
-export type Role = "lma" | "kam" | "sme" | "admin";
+export type Role = "admin" | "kam" | "lma" | "telecaller";
 export interface SessionUser {
   id: string;
   email: string;
