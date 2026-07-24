@@ -1,10 +1,16 @@
 // Supabase Edge Function: intake-lead
 //
-// Receives a POST from the Google Forms Apps Script trigger and turns it
-// into a lead row, with dedup-by-contact-number logic matching the CRM's
-// own smart dedup (see src/lib/dedup.ts in the Next.js app — this function
+// Receives a POST from either (a) the Google Forms Apps Script triggers,
+// or (b) the CRM's own "Sync from Sheet" backup sync (Next.js server
+// action calling this same endpoint with `allow_upsert: true`), and turns
+// it into a lead row. Dedup-by-contact-number logic matches the CRM's own
+// smart dedup (see src/lib/dedup.ts in the Next.js app — this function
 // intentionally mirrors normalizeContact / findDuplicateLead / lead_id
-// generation so both entry points behave identically).
+// generation so all entry points behave identically). `allow_upsert` only
+// changes audit-log wording — the active/closed/cooldown decision tree is
+// the same for both callers, so repeated syncs of the same sheet are
+// idempotent: a match either updates in place or (if closed and still
+// within cooldown) is blocked, and never creates a duplicate row.
 //
 // Env vars used (all auto-provided by Supabase for every Edge Function —
 // nothing to configure): SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
@@ -54,6 +60,8 @@ type IntakePayload = {
   city?: string | null;
   language?: string | null;
   source?: string;
+  /** True when called from the admin's manual "Sync from Sheet" backup sync, rather than a live form submission. Only affects audit-log wording — the dedup/cooldown decision is identical either way. */
+  allow_upsert?: boolean;
 };
 
 type ExistingLead = {
@@ -97,6 +105,7 @@ Deno.serve(async (req: Request) => {
     const email = payload.email?.trim() || null;
     const city = payload.city?.trim() || null;
     const language = payload.language?.trim() || null;
+    const allowUpsert = payload.allow_upsert === true;
 
     if (!name || !rawContact || !source) {
       return json({ ok: false, error: "name, contact, and source are required fields" }, 400);
@@ -146,7 +155,7 @@ Deno.serve(async (req: Request) => {
 
           const { error: auditErr } = await supabase.from("audit_log").insert({
             lead_id: match.id,
-            action: "Lead details updated via form resubmission",
+            action: allowUpsert ? "Lead details updated via sheet sync" : "Lead details updated via form resubmission",
             performed_by: "system",
             metadata: { source, contact: rawContact, name, changes },
           });
@@ -190,7 +199,7 @@ Deno.serve(async (req: Request) => {
 
     const { error: auditErr } = await supabase.from("audit_log").insert({
       lead_id: inserted.id,
-      action: `Lead created via ${source} form`,
+      action: allowUpsert ? `Lead created via ${source} (sheet sync)` : `Lead created via ${source} form`,
       performed_by: "system",
       metadata: { source, contact: rawContact, name },
     });
