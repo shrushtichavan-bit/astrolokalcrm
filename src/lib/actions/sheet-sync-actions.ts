@@ -1,142 +1,134 @@
 "use server";
 
-import Papa from "papaparse";
 import { z } from "zod";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 import { requireRole } from "@/lib/auth";
 
 // Fuzzy column-header matching: a header "matches" a CRM field if it
-// (case-insensitively) contains any of these keywords. Covers every
-// variant named in the spec ("Mobile Number", "Phone Number", "Phone",
-// "Contact", etc.) plus any reasonably-named equivalent.
+// (case-insensitively) contains any of these keywords.
 const COLUMN_KEYWORDS: Record<string, string[]> = {
   contact: ["mobile", "phone", "contact"],
   name: ["name"],
   email: ["email", "e-mail"],
   city: ["city"],
   language: ["language"],
-  source: ["source"],
 };
 
-function detectColumn(headers: string[], keywords: string[]): string | null {
-  for (const header of headers) {
-    const normalized = header.toLowerCase().trim();
-    if (keywords.some((k) => normalized.includes(k))) return header;
+function detectColumn(headers: string[], keywords: string[]): number | null {
+  for (let i = 0; i < headers.length; i++) {
+    const normalized = (headers[i] ?? "").toLowerCase().trim();
+    if (keywords.some((k) => normalized.includes(k))) return i;
   }
   return null;
 }
 
-/** Turns a normal Google Sheets share link (or an already-published CSV link) into a CSV export URL. */
-function toCsvUrl(sheetUrl: string): string {
-  if (sheetUrl.includes("output=csv") || sheetUrl.includes("/export")) return sheetUrl;
-
-  const idMatch = sheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-  if (!idMatch) {
-    throw new Error("That doesn't look like a Google Sheets URL — copy the link from your browser's address bar while viewing the sheet.");
-  }
-  const sheetId = idMatch[1];
-  const gidMatch = sheetUrl.match(/[#&]gid=(\d+)/);
-  const gid = gidMatch ? gidMatch[1] : null;
-  return `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv${gid ? `&gid=${gid}` : ""}`;
+/** Pulls the spreadsheet ID out of a Google Sheets URL — the long id between /d/ and the next /. */
+function extractSpreadsheetId(formUrl: string): string | null {
+  const match = formUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
+  return match ? match[1] : null;
 }
 
-export type SheetLeadRow = {
-  name: string;
-  contact: string;
-  email: string | null;
-  city: string | null;
-  language: string | null;
-  source: string;
-};
-
-export async function fetchSheetRows(input: { sheet_url: string; default_source: string | null }) {
-  const { sheet_url, default_source } = z
-    .object({ sheet_url: z.string().min(1), default_source: z.string().nullable() })
-    .parse(input);
+export async function getSyncableSources() {
   await requireRole("admin");
-
-  const csvUrl = toCsvUrl(sheet_url.trim());
-  const res = await fetch(csvUrl);
-  if (!res.ok) {
-    throw new Error(
-      `Couldn't read that sheet (HTTP ${res.status}). Make sure it's shared as "Anyone with the link can view," or published to the web.`,
-    );
-  }
-  const csvText = await res.text();
-
-  const parsed = Papa.parse<Record<string, string>>(csvText, { header: true, skipEmptyLines: true });
-  const headers = parsed.meta.fields ?? [];
-  if (headers.length === 0) {
-    throw new Error("The sheet appears to be empty, or couldn't be read as a table — check the link and try again.");
-  }
-
-  const columns = {
-    contact: detectColumn(headers, COLUMN_KEYWORDS.contact),
-    name: detectColumn(headers, COLUMN_KEYWORDS.name),
-    email: detectColumn(headers, COLUMN_KEYWORDS.email),
-    city: detectColumn(headers, COLUMN_KEYWORDS.city),
-    language: detectColumn(headers, COLUMN_KEYWORDS.language),
-    source: detectColumn(headers, COLUMN_KEYWORDS.source),
+  const { data, error } = await supabaseAdmin
+    .from("source_priority_config")
+    .select("source_name, form_url")
+    .eq("is_active", true)
+    .not("form_url", "is", null)
+    .order("priority_score", { ascending: true })
+    .order("source_name", { ascending: true });
+  if (error) throw new Error(error.message);
+  return {
+    sources: (data ?? [])
+      .filter((s): s is { source_name: string; form_url: string } => Boolean(s.form_url))
+      .map((s) => ({ source_name: s.source_name, form_url: s.form_url })),
   };
-
-  if (!columns.contact) {
-    throw new Error('Couldn\'t find a contact column in this sheet (looked for headers containing "mobile", "phone", or "contact").');
-  }
-
-  const rows: SheetLeadRow[] = [];
-  let blankContactSkipped = 0;
-
-  for (const raw of parsed.data) {
-    const contact = (columns.contact ? raw[columns.contact] : "")?.toString().trim() ?? "";
-    if (!contact) {
-      blankContactSkipped++;
-      continue;
-    }
-    const sheetSource = columns.source ? raw[columns.source]?.toString().trim() : "";
-    rows.push({
-      name: (columns.name ? raw[columns.name] : "")?.toString().trim() ?? "",
-      contact,
-      email: columns.email ? raw[columns.email]?.toString().trim() || null : null,
-      city: columns.city ? raw[columns.city]?.toString().trim() || null : null,
-      language: columns.language ? raw[columns.language]?.toString().trim() || null : null,
-      source: sheetSource || default_source || "",
-    });
-  }
-
-  return { rows, blank_contact_skipped: blankContactSkipped, detected_columns: columns };
 }
 
-const SheetLeadRowSchema = z.object({
-  name: z.string(),
-  contact: z.string().min(1),
-  email: z.string().nullable(),
-  city: z.string().nullable(),
-  language: z.string().nullable(),
-  source: z.string().min(1, "Every row needs a source — either a source column in the sheet, or pick one from the dropdown before syncing."),
-});
+type SourceSyncResult =
+  | { ok: true; added: number; updated: number; skipped: number }
+  | { ok: false; error: string };
 
-export async function syncSheetRow(input: SheetLeadRow): Promise<{ outcome: "added" | "updated" | "skipped"; detail?: string }> {
-  const data = SheetLeadRowSchema.parse(input);
+/** Reads one source's Google Sheet via the Sheets API and syncs every row through intake-lead. */
+export async function syncOneSource(input: { source_name: string; form_url: string }): Promise<SourceSyncResult> {
+  const data = z.object({ source_name: z.string().min(1), form_url: z.string().min(1) }).parse(input);
   await requireRole("admin");
+
+  const sheetsApiKey = process.env.GOOGLE_SHEETS_API_KEY;
+  if (!sheetsApiKey) return { ok: false, error: "Missing GOOGLE_SHEETS_API_KEY environment variable." };
 
   const supabaseUrl = process.env.SUPABASE_URL;
   const anonKey = process.env.SUPABASE_ANON_KEY;
-  if (!supabaseUrl || !anonKey) {
-    throw new Error("Missing SUPABASE_URL / SUPABASE_ANON_KEY environment variables.");
+  if (!supabaseUrl || !anonKey) return { ok: false, error: "Missing SUPABASE_URL / SUPABASE_ANON_KEY environment variables." };
+
+  const spreadsheetId = extractSpreadsheetId(data.form_url);
+  if (!spreadsheetId) return { ok: false, error: "Couldn't find a spreadsheet ID in this source's Form Link." };
+
+  let values: string[][];
+  try {
+    const res = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Sheet1?key=${sheetsApiKey}`,
+    );
+    if (!res.ok) {
+      const body = await res.text();
+      return { ok: false, error: `Couldn't read the sheet (HTTP ${res.status}): ${body.slice(0, 200)}` };
+    }
+    const json: { values?: string[][] } = await res.json();
+    values = json.values ?? [];
+  } catch (err) {
+    return { ok: false, error: `Request to Google Sheets failed: ${(err as Error).message}` };
   }
 
-  const res = await fetch(`${supabaseUrl}/functions/v1/intake-lead`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${anonKey}` },
-    body: JSON.stringify({ ...data, allow_upsert: true }),
-  });
-
-  const body: { status?: string; reason?: string; error?: string } = await res.json().catch(() => ({}));
-
-  if (res.status === 200 || res.status === 201) {
-    return { outcome: body.status === "updated" ? "updated" : "added" };
+  if (values.length < 2) {
+    return { ok: true, added: 0, updated: 0, skipped: 0 };
   }
-  if (res.status === 409) {
-    return { outcome: "skipped", detail: body.reason ?? "duplicate" };
+
+  const headers = values[0];
+  const contactIdx = detectColumn(headers, COLUMN_KEYWORDS.contact);
+  const nameIdx = detectColumn(headers, COLUMN_KEYWORDS.name);
+  const emailIdx = detectColumn(headers, COLUMN_KEYWORDS.email);
+  const cityIdx = detectColumn(headers, COLUMN_KEYWORDS.city);
+  const languageIdx = detectColumn(headers, COLUMN_KEYWORDS.language);
+
+  if (contactIdx == null) {
+    return { ok: false, error: 'Couldn\'t find a contact column (looked for "mobile", "phone", or "contact" in the header row).' };
   }
-  throw new Error(body.error || `Unexpected response from intake-lead (HTTP ${res.status})`);
+
+  let added = 0;
+  let updated = 0;
+  let skipped = 0;
+
+  for (const row of values.slice(1)) {
+    const contact = (row[contactIdx] ?? "").toString().trim();
+    if (!contact) continue; // missing/blank contact — not a real row, don't count it either way
+
+    const payload = {
+      name: (nameIdx != null ? row[nameIdx] : "")?.toString().trim() || "",
+      contact,
+      email: emailIdx != null ? row[emailIdx]?.toString().trim() || null : null,
+      city: cityIdx != null ? row[cityIdx]?.toString().trim() || null : null,
+      language: languageIdx != null ? row[languageIdx]?.toString().trim() || null : null,
+      source: data.source_name,
+      allow_upsert: true,
+    };
+
+    try {
+      const res = await fetch(`${supabaseUrl}/functions/v1/intake-lead`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${anonKey}` },
+        body: JSON.stringify(payload),
+      });
+      const body: { status?: string } = await res.json().catch(() => ({}));
+      if (res.status === 200 || res.status === 201) {
+        if (body.status === "updated") updated++;
+        else added++;
+      } else {
+        skipped++;
+      }
+    } catch {
+      skipped++;
+    }
+  }
+
+  return { ok: true, added, updated, skipped };
 }
