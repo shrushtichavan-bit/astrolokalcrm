@@ -16,7 +16,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 
-type SourceRow = { source_name: string; priority_score: number; is_active: boolean };
+type SourceRow = { source_name: string; priority_score: number; is_active: boolean; form_url?: string | null };
+
+function truncateUrl(url: string, max = 40): string {
+  return url.length > max ? `${url.slice(0, max)}…` : url;
+}
 
 export default function SourcesPage() {
   const qc = useQueryClient();
@@ -26,7 +30,7 @@ export default function SourcesPage() {
   const [editing, setEditing] = React.useState<SourceRow | null>(null);
 
   function openAdd() {
-    setEditing({ source_name: "", priority_score: 99, is_active: true });
+    setEditing({ source_name: "", priority_score: 99, is_active: true, form_url: "" });
     setOpen(true);
   }
   function openEdit(row: SourceRow) {
@@ -86,6 +90,15 @@ export default function SourcesPage() {
                     <Label>Active</Label>
                     <Switch checked={editing.is_active} onCheckedChange={(v) => setEditing({ ...editing, is_active: v })} />
                   </div>
+                  <div>
+                    <Label>Form Link</Label>
+                    <Input
+                      value={editing.form_url ?? ""}
+                      onChange={(e) => setEditing({ ...editing, form_url: e.target.value })}
+                      placeholder="https://docs.google.com/forms/d/..."
+                    />
+                    <p className="mt-1 text-xs text-muted-foreground">Optional — the Google Form or Sheet this source&apos;s leads come from.</p>
+                  </div>
                 </div>
               )}
               <DialogFooter><Button onClick={save}>Save</Button></DialogFooter>
@@ -107,6 +120,7 @@ export default function SourcesPage() {
                   <TableHead>Source</TableHead>
                   <TableHead className="text-right">Priority</TableHead>
                   <TableHead className="text-center">Active</TableHead>
+                  <TableHead>Form Link</TableHead>
                   <TableHead />
                 </TableRow>
               </TableHeader>
@@ -116,6 +130,21 @@ export default function SourcesPage() {
                     <TableCell className="font-medium">{s.source_name}</TableCell>
                     <TableCell className="text-right tabular-nums">{s.priority_score}</TableCell>
                     <TableCell className="text-center">{s.is_active ? "Yes" : "No"}</TableCell>
+                    <TableCell>
+                      {s.form_url ? (
+                        <a
+                          href={s.form_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-primary hover:underline"
+                          title={s.form_url}
+                        >
+                          {truncateUrl(s.form_url)}
+                        </a>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
                     <TableCell className="text-right">
                       <Button size="sm" variant="outline" className="mr-2" onClick={() => openEdit(s)}>Edit</Button>
                       <Button size="sm" variant="outline" onClick={() => remove(s.source_name)}>Delete</Button>

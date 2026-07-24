@@ -232,12 +232,13 @@ export interface Database {
         Relationships: [];
       };
       source_priority_config: {
-        Row: { id: string; source_name: string; priority_score: number; is_active: boolean; updated_at: string };
+        Row: { id: string; source_name: string; priority_score: number; is_active: boolean; form_url: string | null; updated_at: string };
         Insert: {
           id?: string;
           source_name: string;
           priority_score?: number;
           is_active?: boolean;
+          form_url?: string | null;
           updated_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["source_priority_config"]["Insert"]>;

@@ -30,6 +30,9 @@ next-env.d.ts
 .wrangler/
 .dev.vars
 
+# Supabase CLI local cache (project link info, pooler URL, etc.)
+supabase/.temp/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -22,6 +22,12 @@ export function SheetSyncSection() {
 
   const sourcesQ = useQuery({ queryKey: ["active-sources"], queryFn: () => listActiveSources() });
 
+  function handleSourceChange(value: string) {
+    setFallbackSource(value);
+    const picked = (sourcesQ.data?.sources ?? []).find((s) => s.source_name === value);
+    if (picked?.form_url) setSheetUrl(picked.form_url);
+  }
+
   async function runSync() {
     if (!sheetUrl.trim()) {
       toast.warning("Paste a Google Sheet URL first.");
@@ -89,7 +95,7 @@ export function SheetSyncSection() {
 
           <div>
             <Label>Default source (used only if the sheet has no source column)</Label>
-            <Select value={fallbackSource} onValueChange={setFallbackSource} disabled={syncing}>
+            <Select value={fallbackSource} onValueChange={handleSourceChange} disabled={syncing}>
               <SelectTrigger><SelectValue placeholder="Select a source" /></SelectTrigger>
               <SelectContent>
                 {(sourcesQ.data?.sources ?? []).map((s) => (
