@@ -67,7 +67,7 @@ export async function syncOneSource(input: { source_name: string; form_url: stri
   let values: string[][];
   try {
     const res = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Sheet1?key=${sheetsApiKey}`,
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Form%20Responses%201?key=${sheetsApiKey}`,
     );
     if (!res.ok) {
       const body = await res.text();
