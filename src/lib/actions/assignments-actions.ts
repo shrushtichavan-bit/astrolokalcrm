@@ -7,71 +7,126 @@ import { appendAudit, recordStageAssignment } from "@/lib/helpers";
 
 const STAGES = ["calling", "round_1", "round_2", "round_3", "round_4", "expert_creation"] as const;
 
-const UnassignedFilters = z.object({
+const PAGE_SIZE = 50;
+const MAX_MATCHING_IDS = 1000;
+
+const AllotmentFilters = z.object({
   sources: z.array(z.string()).nullish(),
-  priorities: z.array(z.number().int()).nullish(),
+  priority: z.number().int().nullish(),
   languages: z.array(z.string()).nullish(),
   from: z.string().nullish(),
   to: z.string().nullish(),
 });
-type UnassignedFiltersT = z.infer<typeof UnassignedFilters>;
+type AllotmentFiltersT = z.infer<typeof AllotmentFilters>;
 
-/** Leads with no telecaller assigned yet — the whole point of Admin > Allotment > Unassigned. */
-export async function getUnassignedTelecallerLeads(input: UnassignedFiltersT) {
-  const f = UnassignedFilters.parse(input);
-  await requireRole("admin");
-
-  let q = supabaseAdmin
-    .from("leads")
-    .select("id, lead_id, name, contact, source, priority, lead_date, language, current_stage")
-    .is("assigned_to_email", null)
-    .order("priority", { ascending: true })
-    .order("lead_date", { ascending: true })
-    .limit(1000);
-
-  if (f.sources && f.sources.length > 0) q = q.in("source", f.sources);
-  if (f.priorities && f.priorities.length > 0) q = q.in("priority", f.priorities);
-  if (f.languages && f.languages.length > 0) q = q.in("language", f.languages);
-  if (f.from) q = q.gte("lead_date", f.from);
-  if (f.to) q = q.lte("lead_date", f.to);
-
-  const { data, error } = await q;
-  if (error) throw error;
-  return { leads: data ?? [] };
+function applyAllotmentFilters<
+  T extends {
+    in(column: string, values: readonly unknown[]): T;
+    eq(column: string, value: unknown): T;
+    gte(column: string, value: unknown): T;
+    lte(column: string, value: unknown): T;
+  },
+>(q: T, f: AllotmentFiltersT): T {
+  let query = q;
+  if (f.sources && f.sources.length > 0) query = query.in("source", f.sources);
+  if (f.priority != null) query = query.eq("priority", f.priority);
+  if (f.languages && f.languages.length > 0) query = query.in("language", f.languages);
+  if (f.from) query = query.gte("lead_date", f.from);
+  if (f.to) query = query.lte("lead_date", f.to);
+  return query;
 }
 
-/** Distinct source/language values seen across all leads, for the Unassigned tab's filter bar. */
-export async function getUnassignedFilterOptions() {
+/** Leads with no telecaller assigned yet — Admin > Allotment > Unassigned, one page at a time. */
+export async function getUnassignedTelecallerLeads(input: AllotmentFiltersT & { page?: number }) {
+  const { page: rawPage, ...rest } = z.object({ ...AllotmentFilters.shape, page: z.number().int().min(0).nullish() }).parse(input);
+  const page = rawPage ?? 0;
   await requireRole("admin");
-  const { data } = await supabaseAdmin.from("leads").select("source, language");
-  const sources = new Set<string>();
-  const languages = new Set<string>();
-  for (const l of data ?? []) {
-    if (l.source) sources.add(l.source);
-    if (l.language) languages.add(l.language);
-  }
-  return { sources: Array.from(sources).sort(), languages: Array.from(languages).sort() };
-}
 
-/** Leads that already have a telecaller — the Assigned tab. */
-export async function getAssignedTelecallerLeads() {
-  await requireRole("admin");
-  const [{ data, error }, { data: users }] = await Promise.all([
+  const countQ = applyAllotmentFilters(
+    supabaseAdmin.from("leads").select("*", { count: "exact", head: true }).is("assigned_to_email", null),
+    rest,
+  );
+  const { count, error: countErr } = await countQ;
+  if (countErr) throw countErr;
+
+  const q = applyAllotmentFilters(
     supabaseAdmin
       .from("leads")
-      .select("id, lead_id, name, contact, source, priority, lead_date, current_stage, assigned_to_email")
-      .not("assigned_to_email", "is", null)
-      .order("updated_at", { ascending: false })
-      .limit(500),
-    supabaseAdmin.from("users").select("email, name"),
-  ]);
+      .select("id, lead_id, name, contact, source, priority, lead_date, language")
+      .is("assigned_to_email", null)
+      .order("priority", { ascending: true })
+      .order("lead_date", { ascending: true })
+      .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1),
+    rest,
+  );
+  const { data, error } = await q;
   if (error) throw error;
+
+  return { leads: data ?? [], total: count ?? 0, page, page_size: PAGE_SIZE };
+}
+
+/** Every lead id matching the current filters (not just the current page) — powers "Select all N leads". */
+export async function getUnassignedLeadIds(input: AllotmentFiltersT) {
+  const f = AllotmentFilters.parse(input);
+  await requireRole("admin");
+
+  const q = applyAllotmentFilters(
+    supabaseAdmin.from("leads").select("id").is("assigned_to_email", null).limit(MAX_MATCHING_IDS),
+    f,
+  );
+  const { data, error } = await q;
+  if (error) throw error;
+  return { ids: (data ?? []).map((r) => r.id) };
+}
+
+/** Leads that already have a telecaller — Admin > Allotment > Assigned, one page at a time. */
+export async function getAssignedTelecallerLeads(input: AllotmentFiltersT & { page?: number }) {
+  const { page: rawPage, ...rest } = z.object({ ...AllotmentFilters.shape, page: z.number().int().min(0).nullish() }).parse(input);
+  const page = rawPage ?? 0;
+  await requireRole("admin");
+
+  const countQ = applyAllotmentFilters(
+    supabaseAdmin.from("leads").select("*", { count: "exact", head: true }).not("assigned_to_email", "is", null),
+    rest,
+  );
+  const { count, error: countErr } = await countQ;
+  if (countErr) throw countErr;
+
+  const q = applyAllotmentFilters(
+    supabaseAdmin
+      .from("leads")
+      .select("id, lead_id, name, contact, source, priority, lead_date, language, assigned_to_email")
+      .not("assigned_to_email", "is", null)
+      .order("priority", { ascending: true })
+      .order("lead_date", { ascending: true })
+      .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1),
+    rest,
+  );
+  const { data, error } = await q;
+  if (error) throw error;
+
+  const { data: users } = await supabaseAdmin.from("users").select("email, name");
   const nameByEmail = new Map((users ?? []).map((u) => [u.email, u.name]));
   const leads = (data ?? []).map((l) => ({
     ...l,
     assigned_name: l.assigned_to_email ? (nameByEmail.get(l.assigned_to_email) ?? l.assigned_to_email) : null,
   }));
-  return { leads };
+
+  return { leads, total: count ?? 0, page, page_size: PAGE_SIZE };
+}
+
+/** Every lead id matching the current filters (not just the current page) — powers "Select all N leads". */
+export async function getAssignedLeadIds(input: AllotmentFiltersT) {
+  const f = AllotmentFilters.parse(input);
+  await requireRole("admin");
+
+  const q = applyAllotmentFilters(
+    supabaseAdmin.from("leads").select("id").not("assigned_to_email", "is", null).limit(MAX_MATCHING_IDS),
+    f,
+  );
+  const { data, error } = await q;
+  if (error) throw error;
+  return { ids: (data ?? []).map((r) => r.id) };
 }
 
 /** Assign (or reassign) a telecaller for one or more leads — the only stage Allotment sets upfront now. */

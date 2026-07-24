@@ -6,11 +6,12 @@ import { toast } from "sonner";
 import { ListChecks, ChevronDown } from "lucide-react";
 import {
   getUnassignedTelecallerLeads,
-  getUnassignedFilterOptions,
+  getUnassignedLeadIds,
   getAssignedTelecallerLeads,
+  getAssignedLeadIds,
   assignTelecallerBulk,
 } from "@/lib/actions/assignments-actions";
-import { getPool } from "@/lib/actions/leads-actions";
+import { listActiveSources } from "@/lib/actions/sources-actions";
 import { listAllPeople } from "@/lib/actions/admin-actions";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
@@ -30,6 +31,9 @@ import {
   DropdownMenuCheckboxItem,
 } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+
+const LANGUAGE_OPTIONS = ["Hindi", "Tamil", "Telugu", "Malayalam", "Kannada"].map((l) => ({ value: l, label: l }));
+const PRIORITY_OPTIONS = [1, 2, 3, 4, 5, 99];
 
 function formatContact(c: string): string {
   const digits = (c ?? "").replace(/\D/g, "");
@@ -70,10 +74,131 @@ function MultiSelectFilter({
   );
 }
 
+type Filters = { sources: string[] | null; priority: number | null; languages: string[] | null; from: string | null; to: string | null };
+
+function useAllotmentFilters() {
+  const [sources, setSources] = React.useState<string[]>([]);
+  const [languages, setLanguages] = React.useState<string[]>([]);
+  const [priority, setPriority] = React.useState("");
+  const [from, setFrom] = React.useState("");
+  const [to, setTo] = React.useState("");
+
+  const filters: Filters = React.useMemo(
+    () => ({
+      sources: sources.length ? sources : null,
+      priority: priority ? parseInt(priority, 10) : null,
+      languages: languages.length ? languages : null,
+      from: from || null,
+      to: to || null,
+    }),
+    [sources, languages, priority, from, to],
+  );
+
+  const hasActive = sources.length > 0 || languages.length > 0 || Boolean(priority) || Boolean(from) || Boolean(to);
+
+  function clearAll() {
+    setSources([]);
+    setLanguages([]);
+    setPriority("");
+    setFrom("");
+    setTo("");
+  }
+
+  return { sources, setSources, languages, setLanguages, priority, setPriority, from, setFrom, to, setTo, filters, hasActive, clearAll };
+}
+
+function AllotmentFiltersBar({
+  state,
+  sourceOptions,
+}: {
+  state: ReturnType<typeof useAllotmentFilters>;
+  sourceOptions: { value: string; label: string }[];
+}) {
+  return (
+    <Card>
+      <CardContent className="flex flex-wrap items-end gap-3 p-4">
+        <MultiSelectFilter label="Language" options={LANGUAGE_OPTIONS} selected={state.languages} onChange={state.setLanguages} />
+        <MultiSelectFilter label="Source" options={sourceOptions} selected={state.sources} onChange={state.setSources} />
+        <div>
+          <label className="mb-1 block text-xs text-muted-foreground">Priority</label>
+          <Select value={state.priority || "__all"} onValueChange={(v) => state.setPriority(v === "__all" ? "" : v)}>
+            <SelectTrigger className="w-24"><SelectValue placeholder="All" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all">All</SelectItem>
+              {PRIORITY_OPTIONS.map((p) => <SelectItem key={p} value={String(p)}>{p}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs text-muted-foreground">From</label>
+          <Input type="date" value={state.from} onChange={(e) => state.setFrom(e.target.value)} className="w-36" />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs text-muted-foreground">To</label>
+          <Input type="date" value={state.to} onChange={(e) => state.setTo(e.target.value)} className="w-36" />
+        </div>
+        {state.hasActive && (
+          <button type="button" onClick={state.clearAll} className="text-sm font-medium text-primary hover:underline">
+            Clear all filters
+          </button>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function PaginationBar({
+  page,
+  totalPages,
+  total,
+  onPageChange,
+}: {
+  page: number;
+  totalPages: number;
+  total: number;
+  onPageChange: (p: number) => void;
+}) {
+  if (total === 0) return null;
+  return (
+    <div className="flex items-center justify-between text-sm text-muted-foreground">
+      <span>Page {page + 1} of {totalPages} ({total} total)</span>
+      <div className="flex gap-2">
+        <Button size="sm" variant="outline" disabled={page <= 0} onClick={() => onPageChange(page - 1)}>Previous</Button>
+        <Button size="sm" variant="outline" disabled={page >= totalPages - 1} onClick={() => onPageChange(page + 1)}>Next</Button>
+      </div>
+    </div>
+  );
+}
+
+function SelectAllBanner({
+  selectedCount,
+  total,
+  expanding,
+  onSelectAll,
+}: {
+  selectedCount: number;
+  total: number;
+  expanding: boolean;
+  onSelectAll: () => void;
+}) {
+  if (selectedCount >= total) return null;
+  return (
+    <div className="rounded-md bg-primary/5 px-4 py-2 text-sm text-foreground">
+      {selectedCount} lead{selectedCount === 1 ? "" : "s"} selected.{" "}
+      <button type="button" onClick={onSelectAll} disabled={expanding} className="font-medium text-primary hover:underline disabled:opacity-60">
+        {expanding ? "Selecting…" : `Select all ${total} leads?`}
+      </button>
+    </div>
+  );
+}
+
 export default function AllotmentPage() {
   return (
     <div>
-      <PageHeader title="Allotment" description="Assign a telecaller to new leads. Every stage after that is picked by whoever's working the lead, as they go." />
+      <PageHeader
+        title="Allotment"
+        description="Assign a telecaller to each lead. After that, each team member picks the next person as the lead moves forward."
+      />
       <Tabs defaultValue="unassigned" className="w-full">
         <TabsList>
           <TabsTrigger value="unassigned">Unassigned</TabsTrigger>
@@ -86,46 +211,66 @@ export default function AllotmentPage() {
   );
 }
 
-const PRIORITY_OPTIONS = [1, 2, 3, 4, 5].map((n) => ({ value: String(n), label: `P${n}` }));
-
 function UnassignedTab() {
   const qc = useQueryClient();
-  const [sources, setSources] = React.useState<string[]>([]);
-  const [priorities, setPriorities] = React.useState<string[]>([]);
-  const [languages, setLanguages] = React.useState<string[]>([]);
-  const [from, setFrom] = React.useState("");
-  const [to, setTo] = React.useState("");
+  const filterState = useAllotmentFilters();
+  const [page, setPage] = React.useState(0);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [assignTo, setAssignTo] = React.useState("");
   const [busy, setBusy] = React.useState(false);
+  const [expanding, setExpanding] = React.useState(false);
 
-  const optionsQ = useQuery({ queryKey: ["allotment-filter-options"], queryFn: () => getUnassignedFilterOptions() });
-  const poolQ = useQuery({ queryKey: ["pool", "calling"], queryFn: () => getPool({ stage: "calling" }), staleTime: 5 * 60_000 });
+  const filtersKey = JSON.stringify(filterState.filters);
+  React.useEffect(() => {
+    setPage(0);
+    setSelected(new Set());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtersKey]);
+
+  const sourcesQ = useQuery({ queryKey: ["active-sources"], queryFn: () => listActiveSources() });
   const peopleQ = useQuery({ queryKey: ["admin-people"], queryFn: () => listAllPeople(), staleTime: 5 * 60_000 });
-  const nameByEmail = React.useMemo(() => new Map((peopleQ.data?.people ?? []).map((p) => [p.email, p.name])), [peopleQ.data]);
+  const telecallers = React.useMemo(() => (peopleQ.data?.people ?? []).filter((p) => p.role === "lma"), [peopleQ.data]);
 
-  const filters = React.useMemo(
-    () => ({
-      sources: sources.length ? sources : null,
-      priorities: priorities.length ? priorities.map((p) => parseInt(p, 10)) : null,
-      languages: languages.length ? languages : null,
-      from: from || null,
-      to: to || null,
-    }),
-    [sources, priorities, languages, from, to],
-  );
-  const q = useQuery({ queryKey: ["admin-unassigned-leads", filters], queryFn: () => getUnassignedTelecallerLeads(filters) });
+  const q = useQuery({
+    queryKey: ["admin-unassigned-leads", filterState.filters, page],
+    queryFn: () => getUnassignedTelecallerLeads({ ...filterState.filters, page }),
+  });
 
-  const leads = q.data?.leads ?? [];
+  const leads = React.useMemo(() => q.data?.leads ?? [], [q.data]);
+  const total = q.data?.total ?? 0;
+  const pageSize = q.data?.page_size ?? 50;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const pageIds = React.useMemo(() => leads.map((l) => l.id), [leads]);
+  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
 
   function toggle(id: string) {
-    const next = new Set(selected);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setSelected(next);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }
-  function toggleAll() {
-    setSelected(selected.size === leads.length ? new Set() : new Set(leads.map((l) => l.id)));
+
+  function toggleAllVisible() {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allPageSelected) pageIds.forEach((id) => next.delete(id));
+      else pageIds.forEach((id) => next.add(id));
+      return next;
+    });
+  }
+
+  async function selectAllMatching() {
+    setExpanding(true);
+    try {
+      const { ids } = await getUnassignedLeadIds(filterState.filters);
+      setSelected(new Set(ids));
+    } catch (e) {
+      toast.error("Couldn't select all leads.", { description: (e as Error).message });
+    } finally {
+      setExpanding(false);
+    }
   }
 
   async function assign() {
@@ -136,7 +281,7 @@ function UnassignedTab() {
     setBusy(true);
     try {
       const r = await assignTelecallerBulk({ lead_ids: Array.from(selected), telecaller_email: assignTo });
-      toast.success(`${r.count} lead${r.count === 1 ? "" : "s"} assigned to ${assignTo}`);
+      toast.success(`${r.count} lead${r.count === 1 ? "" : "s"} assigned.`);
       setSelected(new Set());
       setAssignTo("");
       qc.invalidateQueries({ queryKey: ["admin-unassigned-leads"] });
@@ -148,79 +293,54 @@ function UnassignedTab() {
     }
   }
 
-  const sourceOptions = (optionsQ.data?.sources ?? []).map((s) => ({ value: s, label: s }));
-  const languageOptions = (optionsQ.data?.languages ?? []).map((l) => ({ value: l, label: l }));
+  const sourceOptions = (sourcesQ.data?.sources ?? []).map((s) => ({ value: s.source_name, label: s.source_name }));
 
   return (
-    <div className="mt-4 space-y-4 pb-20">
-      <Card>
-        <CardContent className="flex flex-wrap items-end gap-3 p-4">
-          <MultiSelectFilter label="Source" options={sourceOptions} selected={sources} onChange={setSources} />
-          <MultiSelectFilter label="Priority" options={PRIORITY_OPTIONS} selected={priorities} onChange={setPriorities} />
-          <MultiSelectFilter label="Language" options={languageOptions} selected={languages} onChange={setLanguages} />
-          <div>
-            <label className="mb-1 block text-xs text-muted-foreground">From</label>
-            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-36" />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs text-muted-foreground">To</label>
-            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="w-36" />
-          </div>
-          {(sources.length > 0 || priorities.length > 0 || languages.length > 0 || from || to) && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setSources([]);
-                setPriorities([]);
-                setLanguages([]);
-                setFrom("");
-                setTo("");
-              }}
-            >
-              Clear filters
-            </Button>
-          )}
-        </CardContent>
-      </Card>
+    <div className="mt-4 space-y-4 pb-24">
+      <AllotmentFiltersBar state={filterState} sourceOptions={sourceOptions} />
+
+      {allPageSelected && <SelectAllBanner selectedCount={selected.size} total={total} expanding={expanding} onSelectAll={selectAllMatching} />}
 
       {q.isLoading ? (
         <Skeleton className="h-64 w-full" />
       ) : leads.length === 0 ? (
         <EmptyState icon={ListChecks} title="Nothing unassigned" description="Every lead matching these filters already has a telecaller." />
       ) : (
-        <Card>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-8"><Checkbox checked={leads.length > 0 && selected.size === leads.length} onCheckedChange={toggleAll} /></TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Contact</TableHead>
-                  <TableHead>Source</TableHead>
-                  <TableHead>Priority</TableHead>
-                  <TableHead>Lead Date</TableHead>
-                  <TableHead>Language</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {leads.map((l) => (
-                  <TableRow key={l.id}>
-                    <TableCell><Checkbox checked={selected.has(l.id)} onCheckedChange={() => toggle(l.id)} /></TableCell>
-                    <TableCell className="font-medium">{l.name}</TableCell>
-                    <TableCell className="tabular-nums text-muted-foreground">{formatContact(l.contact)}</TableCell>
-                    <TableCell>
-                      {l.source ? <Badge variant="secondary">{l.source}</Badge> : <span className="text-muted-foreground">—</span>}
-                    </TableCell>
-                    <TableCell><PriorityBadge priority={l.priority} /></TableCell>
-                    <TableCell className="text-muted-foreground">{l.lead_date ?? "—"}</TableCell>
-                    <TableCell className="text-muted-foreground">{l.language ?? "—"}</TableCell>
+        <>
+          <Card>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-8"><Checkbox checked={allPageSelected} onCheckedChange={toggleAllVisible} /></TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Contact</TableHead>
+                    <TableHead>Source</TableHead>
+                    <TableHead>Language</TableHead>
+                    <TableHead>Priority</TableHead>
+                    <TableHead>Date</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+                </TableHeader>
+                <TableBody>
+                  {leads.map((l) => (
+                    <TableRow key={l.id}>
+                      <TableCell><Checkbox checked={selected.has(l.id)} onCheckedChange={() => toggle(l.id)} /></TableCell>
+                      <TableCell className="font-medium">{l.name}</TableCell>
+                      <TableCell className="tabular-nums text-muted-foreground">{formatContact(l.contact)}</TableCell>
+                      <TableCell>
+                        {l.source ? <Badge variant="secondary">{l.source}</Badge> : <span className="text-muted-foreground">—</span>}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">{l.language ?? "—"}</TableCell>
+                      <TableCell><PriorityBadge priority={l.priority} /></TableCell>
+                      <TableCell className="text-muted-foreground">{l.lead_date ?? "—"}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+          <PaginationBar page={page} totalPages={totalPages} total={total} onPageChange={setPage} />
+        </>
       )}
 
       {selected.size > 0 && (
@@ -230,10 +350,17 @@ function UnassignedTab() {
             <Select value={assignTo} onValueChange={setAssignTo}>
               <SelectTrigger className="w-64"><SelectValue placeholder="Select telecaller" /></SelectTrigger>
               <SelectContent>
-                {(poolQ.data?.members ?? []).map((m) => <SelectItem key={m} value={m}>{nameByEmail.get(m) ?? m}</SelectItem>)}
+                {telecallers.map((t) => <SelectItem key={t.email} value={t.email}>{t.name}</SelectItem>)}
               </SelectContent>
             </Select>
-            <Button onClick={assign} disabled={busy}>{busy ? "Assigning…" : "Assign Telecaller"}</Button>
+            <Button onClick={assign} disabled={busy}>{busy ? "Assigning…" : "Assign"}</Button>
+            <button
+              type="button"
+              onClick={() => setSelected(new Set())}
+              className="text-sm text-muted-foreground hover:text-foreground hover:underline"
+            >
+              Clear selection
+            </button>
           </div>
         </div>
       )}
@@ -243,15 +370,92 @@ function UnassignedTab() {
 
 function AssignedTab() {
   const qc = useQueryClient();
-  const q = useQuery({ queryKey: ["admin-assigned-leads"], queryFn: () => getAssignedTelecallerLeads() });
-  const poolQ = useQuery({ queryKey: ["pool", "calling"], queryFn: () => getPool({ stage: "calling" }), staleTime: 5 * 60_000 });
-  const peopleQ = useQuery({ queryKey: ["admin-people"], queryFn: () => listAllPeople(), staleTime: 5 * 60_000 });
-  const nameByEmail = React.useMemo(() => new Map((peopleQ.data?.people ?? []).map((p) => [p.email, p.name])), [peopleQ.data]);
+  const filterState = useAllotmentFilters();
+  const [page, setPage] = React.useState(0);
+  const [selected, setSelected] = React.useState<Set<string>>(new Set());
+  const [assignTo, setAssignTo] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [expanding, setExpanding] = React.useState(false);
   const [reassigningId, setReassigningId] = React.useState<string | null>(null);
   const [reassignTo, setReassignTo] = React.useState("");
-  const [busy, setBusy] = React.useState(false);
+  const [rowBusy, setRowBusy] = React.useState(false);
 
-  const leads = q.data?.leads ?? [];
+  const filtersKey = JSON.stringify(filterState.filters);
+  React.useEffect(() => {
+    setPage(0);
+    setSelected(new Set());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtersKey]);
+
+  const sourcesQ = useQuery({ queryKey: ["active-sources"], queryFn: () => listActiveSources() });
+  const peopleQ = useQuery({ queryKey: ["admin-people"], queryFn: () => listAllPeople(), staleTime: 5 * 60_000 });
+  const telecallers = React.useMemo(() => (peopleQ.data?.people ?? []).filter((p) => p.role === "lma"), [peopleQ.data]);
+
+  const q = useQuery({
+    queryKey: ["admin-assigned-leads", filterState.filters, page],
+    queryFn: () => getAssignedTelecallerLeads({ ...filterState.filters, page }),
+  });
+
+  const leads = React.useMemo(() => q.data?.leads ?? [], [q.data]);
+  const total = q.data?.total ?? 0;
+  const pageSize = q.data?.page_size ?? 50;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const pageIds = React.useMemo(() => leads.map((l) => l.id), [leads]);
+  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAllVisible() {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allPageSelected) pageIds.forEach((id) => next.delete(id));
+      else pageIds.forEach((id) => next.add(id));
+      return next;
+    });
+  }
+
+  async function selectAllMatching() {
+    setExpanding(true);
+    try {
+      const { ids } = await getAssignedLeadIds(filterState.filters);
+      setSelected(new Set(ids));
+    } catch (e) {
+      toast.error("Couldn't select all leads.", { description: (e as Error).message });
+    } finally {
+      setExpanding(false);
+    }
+  }
+
+  function refresh() {
+    qc.invalidateQueries({ queryKey: ["admin-unassigned-leads"] });
+    qc.invalidateQueries({ queryKey: ["admin-assigned-leads"] });
+  }
+
+  async function bulkReassign() {
+    if (!assignTo) {
+      toast.warning("Select a telecaller first.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await assignTelecallerBulk({ lead_ids: Array.from(selected), telecaller_email: assignTo });
+      toast.success(`${r.count} lead${r.count === 1 ? "" : "s"} reassigned.`);
+      setSelected(new Set());
+      setAssignTo("");
+      refresh();
+    } catch (e) {
+      toast.error("Something went wrong.", { description: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
 
   function startReassign(id: string, current: string | null) {
     setReassigningId(id);
@@ -263,73 +467,108 @@ function AssignedTab() {
       toast.warning("Select a telecaller first.");
       return;
     }
-    setBusy(true);
+    setRowBusy(true);
     try {
       await assignTelecallerBulk({ lead_ids: [id], telecaller_email: reassignTo });
-      toast.success(`Reassigned to ${reassignTo}.`);
+      toast.success("Reassigned.");
       setReassigningId(null);
-      qc.invalidateQueries({ queryKey: ["admin-assigned-leads"] });
+      refresh();
     } catch (e) {
       toast.error("Something went wrong.", { description: (e as Error).message });
     } finally {
-      setBusy(false);
+      setRowBusy(false);
     }
   }
 
-  if (q.isLoading) return <Skeleton className="mt-4 h-64 w-full" />;
+  const sourceOptions = (sourcesQ.data?.sources ?? []).map((s) => ({ value: s.source_name, label: s.source_name }));
 
   return (
-    <div className="mt-4 space-y-4">
-      {leads.length === 0 ? (
+    <div className="mt-4 space-y-4 pb-24">
+      <AllotmentFiltersBar state={filterState} sourceOptions={sourceOptions} />
+
+      {allPageSelected && <SelectAllBanner selectedCount={selected.size} total={total} expanding={expanding} onSelectAll={selectAllMatching} />}
+
+      {q.isLoading ? (
+        <Skeleton className="h-64 w-full" />
+      ) : leads.length === 0 ? (
         <EmptyState icon={ListChecks} title="No assigned leads yet" description="Assign a telecaller from the Unassigned tab to get started." />
       ) : (
-        <Card>
-          <CardContent className="overflow-x-auto p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Contact</TableHead>
-                  <TableHead>Source</TableHead>
-                  <TableHead>Priority</TableHead>
-                  <TableHead>Assigned Telecaller</TableHead>
-                  <TableHead>Current Stage</TableHead>
-                  <TableHead>Lead Date</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {leads.map((l) => (
-                  <TableRow key={l.id}>
-                    <TableCell className="font-medium">{l.name}</TableCell>
-                    <TableCell className="tabular-nums text-muted-foreground">{formatContact(l.contact)}</TableCell>
-                    <TableCell className="text-muted-foreground">{l.source ?? "—"}</TableCell>
-                    <TableCell><PriorityBadge priority={l.priority} /></TableCell>
-                    <TableCell className="text-muted-foreground">{l.assigned_name ?? l.assigned_to_email}</TableCell>
-                    <TableCell className="text-xs">{l.current_stage}</TableCell>
-                    <TableCell className="text-muted-foreground">{l.lead_date ?? "—"}</TableCell>
-                    <TableCell className="text-right">
-                      {reassigningId === l.id ? (
-                        <div className="flex items-center justify-end gap-2">
-                          <Select value={reassignTo} onValueChange={setReassignTo}>
-                            <SelectTrigger className="h-8 w-44"><SelectValue placeholder="Telecaller" /></SelectTrigger>
-                            <SelectContent>
-                              {(poolQ.data?.members ?? []).map((m) => <SelectItem key={m} value={m}>{nameByEmail.get(m) ?? m}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                          <Button size="sm" disabled={busy} onClick={() => confirmReassign(l.id)}>Confirm</Button>
-                          <Button size="sm" variant="ghost" onClick={() => setReassigningId(null)}>Cancel</Button>
-                        </div>
-                      ) : (
-                        <Button size="sm" variant="outline" onClick={() => startReassign(l.id, l.assigned_to_email)}>Reassign</Button>
-                      )}
-                    </TableCell>
+        <>
+          <Card>
+            <CardContent className="overflow-x-auto p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-8"><Checkbox checked={allPageSelected} onCheckedChange={toggleAllVisible} /></TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Contact</TableHead>
+                    <TableHead>Source</TableHead>
+                    <TableHead>Language</TableHead>
+                    <TableHead>Priority</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Assigned To</TableHead>
+                    <TableHead />
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+                </TableHeader>
+                <TableBody>
+                  {leads.map((l) => (
+                    <TableRow key={l.id}>
+                      <TableCell><Checkbox checked={selected.has(l.id)} onCheckedChange={() => toggle(l.id)} /></TableCell>
+                      <TableCell className="font-medium">{l.name}</TableCell>
+                      <TableCell className="tabular-nums text-muted-foreground">{formatContact(l.contact)}</TableCell>
+                      <TableCell>
+                        {l.source ? <Badge variant="secondary">{l.source}</Badge> : <span className="text-muted-foreground">—</span>}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">{l.language ?? "—"}</TableCell>
+                      <TableCell><PriorityBadge priority={l.priority} /></TableCell>
+                      <TableCell className="text-muted-foreground">{l.lead_date ?? "—"}</TableCell>
+                      <TableCell className="text-muted-foreground">{l.assigned_name ?? l.assigned_to_email}</TableCell>
+                      <TableCell className="text-right">
+                        {reassigningId === l.id ? (
+                          <div className="flex items-center justify-end gap-2">
+                            <Select value={reassignTo} onValueChange={setReassignTo}>
+                              <SelectTrigger className="h-8 w-44"><SelectValue placeholder="Telecaller" /></SelectTrigger>
+                              <SelectContent>
+                                {telecallers.map((t) => <SelectItem key={t.email} value={t.email}>{t.name}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                            <Button size="sm" disabled={rowBusy} onClick={() => confirmReassign(l.id)}>Confirm</Button>
+                            <Button size="sm" variant="ghost" onClick={() => setReassigningId(null)}>Cancel</Button>
+                          </div>
+                        ) : (
+                          <Button size="sm" variant="outline" onClick={() => startReassign(l.id, l.assigned_to_email)}>Reassign</Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+          <PaginationBar page={page} totalPages={totalPages} total={total} onPageChange={setPage} />
+        </>
+      )}
+
+      {selected.size > 0 && (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card px-6 py-4 shadow-lg md:left-64">
+          <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-3">
+            <span className="text-sm font-medium text-foreground">{selected.size} lead{selected.size === 1 ? "" : "s"} selected</span>
+            <Select value={assignTo} onValueChange={setAssignTo}>
+              <SelectTrigger className="w-64"><SelectValue placeholder="Select telecaller" /></SelectTrigger>
+              <SelectContent>
+                {telecallers.map((t) => <SelectItem key={t.email} value={t.email}>{t.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Button onClick={bulkReassign} disabled={busy}>{busy ? "Reassigning…" : "Reassign"}</Button>
+            <button
+              type="button"
+              onClick={() => setSelected(new Set())}
+              className="text-sm text-muted-foreground hover:text-foreground hover:underline"
+            >
+              Clear selection
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
