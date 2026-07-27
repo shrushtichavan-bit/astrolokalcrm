@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ChevronLeft, Check } from "lucide-react";
@@ -47,7 +47,16 @@ const OUTCOME_LABELS: Record<string, string> = {
 
 export function LeadDetailClient({ id, userEmail }: { id: string; userEmail: string }) {
   const qc = useQueryClient();
+  const router = useRouter();
   const leadQ = useQuery({ queryKey: ["lead", id], queryFn: () => getLead({ id }) });
+
+  function goBack() {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back();
+    } else {
+      router.push("/dashboard");
+    }
+  }
 
   function refresh() {
     qc.invalidateQueries({ queryKey: ["lead", id] });
@@ -85,9 +94,13 @@ export function LeadDetailClient({ id, userEmail }: { id: string; userEmail: str
 
   return (
     <div>
-      <Link href="/dashboard" className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-        <ChevronLeft className="h-4 w-4" /> Dashboard
-      </Link>
+      <button
+        type="button"
+        onClick={goBack}
+        className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ChevronLeft className="h-4 w-4" /> Back
+      </button>
 
       <Card className="mb-4">
         <CardContent className="flex flex-wrap items-start justify-between gap-4 p-6">
@@ -164,6 +177,11 @@ function LeadTimeline({ data }: { data: LeadData }) {
     | undefined;
   const callingState: TimelineState = lead.current_stage === "calling_pending" ? "current" : "done";
   const callingOutcome = lastAttempt ? (lastAttempt.outcome ?? (lastAttempt.connected ? "connected" : "rnr")) : null;
+  // While calling is the live stage, current_owner_email is the authoritative
+  // owner (it's what ActionsPanel's "Passed to X" also reads) — the
+  // lead_stage_assignments/assigned_to_email fallback is only for the
+  // historical record once the lead has moved on.
+  const callingAssignedEmail = callingState === "current" ? lead.current_owner_email : (assignedByStage.get("calling") ?? lead.assigned_to_email);
   items.push({
     id: "calling",
     title: "Calling",
@@ -171,10 +189,10 @@ function LeadTimeline({ data }: { data: LeadData }) {
     state: callingState,
     pill: callingOutcome ? (callingOutcome as StatusKind) : "pending",
     pillLabel: callingOutcome ? (OUTCOME_LABELS[callingOutcome] ?? callingOutcome) : "Pending",
-    assignedTo: nameOf(assignedByStage.get("calling") ?? lead.assigned_to_email),
+    assignedTo: nameOf(callingAssignedEmail),
     details: (
       <div className="space-y-2 text-sm text-muted-foreground">
-        <div>Assigned to: <span className="font-medium text-foreground">{nameOf(assignedByStage.get("calling") ?? lead.assigned_to_email)}</span></div>
+        <div>Assigned to: <span className="font-medium text-foreground">{nameOf(callingAssignedEmail)}</span></div>
         {sortedAttempts.length === 0 && <div>No attempts logged yet.</div>}
         {sortedAttempts.map((a) => {
           const o = (a as { outcome?: string | null }).outcome ?? (a.connected ? "connected" : "rnr");
@@ -195,7 +213,11 @@ function LeadTimeline({ data }: { data: LeadData }) {
   for (let n = 1; n <= numRounds; n++) {
     const round = rounds.find((r) => r.round_number === n);
     const stageKey = `round_${n}`;
-    const assignedTo = assignedByStage.get(stageKey);
+    const isCurrentStage = lead.current_stage === `${stageKey}_pending`;
+    // Same reasoning as calling above: while this round is the live stage,
+    // current_owner_email is the authoritative owner, not the (possibly
+    // stale) lead_stage_assignments row.
+    const assignedTo = isCurrentStage ? lead.current_owner_email : assignedByStage.get(stageKey);
     let state: TimelineState;
     let pill: StatusKind;
     let pillLabel: string;
@@ -203,7 +225,7 @@ function LeadTimeline({ data }: { data: LeadData }) {
       state = "done";
       pill = round.passed === true ? "passed" : round.passed === false ? "failed" : "pending";
       pillLabel = round.passed === true ? "Passed" : round.passed === false ? "Failed" : "Submitted";
-    } else if (lead.current_stage === `${stageKey}_pending`) {
+    } else if (isCurrentStage) {
       state = "current";
       pill = "pending";
       pillLabel = "In progress";
@@ -233,7 +255,11 @@ function LeadTimeline({ data }: { data: LeadData }) {
     });
   }
 
-  const assignedCreation = assignedByStage.get("expert_creation");
+  const isExpertCreationCurrentStage = lead.current_stage === "profile_creation_pending";
+  // Same reasoning as calling/rounds above: while this is the live stage
+  // and no profile has been linked yet, current_owner_email is the
+  // authoritative owner, not the (possibly stale) lead_stage_assignments row.
+  const assignedCreation = isExpertCreationCurrentStage ? lead.current_owner_email : assignedByStage.get("expert_creation");
   let creationState: TimelineState;
   let creationPill: StatusKind;
   let creationLabel: string;
@@ -245,7 +271,7 @@ function LeadTimeline({ data }: { data: LeadData }) {
     creationState = "done";
     creationPill = "inactive";
     creationLabel = "Profile Created";
-  } else if (lead.current_stage === "profile_creation_pending") {
+  } else if (isExpertCreationCurrentStage) {
     creationState = "current";
     creationPill = "pending";
     creationLabel = "In progress";

@@ -74,7 +74,14 @@ function MultiSelectFilter({
   );
 }
 
-type Filters = { sources: string[] | null; priority: number | null; languages: string[] | null; from: string | null; to: string | null };
+type Filters = {
+  sources: string[] | null;
+  priority: number | null;
+  languages: string[] | null;
+  from: string | null;
+  to: string | null;
+  dateDir: "asc" | "desc";
+};
 
 function useAllotmentFilters() {
   const [sources, setSources] = React.useState<string[]>([]);
@@ -82,6 +89,7 @@ function useAllotmentFilters() {
   const [priority, setPriority] = React.useState("");
   const [from, setFrom] = React.useState("");
   const [to, setTo] = React.useState("");
+  const [dateDir, setDateDir] = React.useState<"asc" | "desc">("asc");
 
   const filters: Filters = React.useMemo(
     () => ({
@@ -90,8 +98,9 @@ function useAllotmentFilters() {
       languages: languages.length ? languages : null,
       from: from || null,
       to: to || null,
+      dateDir,
     }),
-    [sources, languages, priority, from, to],
+    [sources, languages, priority, from, to, dateDir],
   );
 
   const hasActive = sources.length > 0 || languages.length > 0 || Boolean(priority) || Boolean(from) || Boolean(to);
@@ -104,7 +113,15 @@ function useAllotmentFilters() {
     setTo("");
   }
 
-  return { sources, setSources, languages, setLanguages, priority, setPriority, from, setFrom, to, setTo, filters, hasActive, clearAll };
+  function toggleDateSort() {
+    setDateDir((d) => (d === "asc" ? "desc" : "asc"));
+  }
+
+  return {
+    sources, setSources, languages, setLanguages, priority, setPriority, from, setFrom, to, setTo,
+    dateDir, toggleDateSort,
+    filters, hasActive, clearAll,
+  };
 }
 
 function AllotmentFiltersBar({
@@ -318,7 +335,9 @@ function UnassignedTab() {
                     <TableHead>Source</TableHead>
                     <TableHead>Language</TableHead>
                     <TableHead>Priority</TableHead>
-                    <TableHead>Date</TableHead>
+                    <TableHead className="cursor-pointer select-none" onClick={filterState.toggleDateSort}>
+                      Date {filterState.dateDir === "asc" ? "↑" : "↓"}
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -505,7 +524,9 @@ function AssignedTab() {
                     <TableHead>Source</TableHead>
                     <TableHead>Language</TableHead>
                     <TableHead>Priority</TableHead>
-                    <TableHead>Date</TableHead>
+                    <TableHead className="cursor-pointer select-none" onClick={filterState.toggleDateSort}>
+                      Date {filterState.dateDir === "asc" ? "↑" : "↓"}
+                    </TableHead>
                     <TableHead>Assigned To</TableHead>
                     <TableHead />
                   </TableRow>

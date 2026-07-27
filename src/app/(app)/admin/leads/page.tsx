@@ -33,40 +33,75 @@ function attemptChipClass(outcome: string): string {
   return "bg-muted text-muted-foreground";
 }
 
-function AttemptChip({ outcome }: { outcome: string }) {
-  return (
-    <span className={`inline-flex w-full items-center justify-center rounded px-1.5 py-0.5 text-[10px] font-medium ${attemptChipClass(outcome)}`}>
-      {outcome ? (ATTEMPT_CHIP_LABELS[outcome] ?? outcome) : "–"}
-    </span>
-  );
-}
+type AttemptSlot = { outcome: string; by: string };
+type RoundSlot = { status: "done" | "pending_assigned" | "not_reached"; passed: boolean | null; person: string };
+type ExpertCreationSlot = { status: "done" | "in_progress" | "pending" | "not_reached"; person: string };
 
-function CallingAttemptsCell({ a1, a2, a3 }: { a1: string; a2: string; a3: string }) {
+function AttemptSlotCell({ slot }: { slot: AttemptSlot }) {
+  if (!slot.outcome) return <span className="text-muted-foreground/30">–</span>;
   return (
-    <div className="flex w-32 gap-1">
-      <AttemptChip outcome={a1} />
-      <AttemptChip outcome={a2} />
-      <AttemptChip outcome={a3} />
+    <div className="flex flex-col items-start gap-0.5">
+      <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ${attemptChipClass(slot.outcome)}`}>
+        {ATTEMPT_CHIP_LABELS[slot.outcome] ?? slot.outcome}
+      </span>
+      {slot.by && <span className="text-xs text-muted-foreground">{slot.by}</span>}
     </div>
   );
 }
 
-function RoundResultCell({ result, interviewer }: { result: "passed" | "failed" | ""; interviewer: string }) {
+function CallingAttemptsCell({ attempts }: { attempts: AttemptSlot[] }) {
+  return (
+    <div className="flex gap-2">
+      {attempts.map((a, i) => <AttemptSlotCell key={i} slot={a} />)}
+    </div>
+  );
+}
+
+function RoundCell({ round }: { round: RoundSlot }) {
+  if (round.status === "not_reached") return <span className="text-muted-foreground/30">–</span>;
+  if (round.status === "pending_assigned") {
+    return (
+      <div className="flex flex-col items-start gap-0.5">
+        <span className="text-xs font-medium text-muted-foreground">Yet to take</span>
+        {round.person && <span className="text-xs text-muted-foreground">{round.person}</span>}
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col items-start gap-0.5">
-      {result === "passed" && (
+      {round.passed ? (
         <span className="inline-flex h-5 w-5 items-center justify-center rounded border border-success/30 bg-success/10">
           <Check className="h-3.5 w-3.5 text-success/70" strokeWidth={2.5} />
         </span>
-      )}
-      {result === "failed" && (
+      ) : (
         <span className="inline-flex h-5 w-5 items-center justify-center rounded border border-destructive/30 bg-destructive/10">
           <X className="h-3.5 w-3.5 text-destructive/70" strokeWidth={2.5} />
         </span>
       )}
-      {interviewer && <span className="text-xs text-muted-foreground">{interviewer}</span>}
+      {round.person && <span className="text-xs text-muted-foreground">{round.person}</span>}
     </div>
   );
+}
+
+function ExpertCreationCell({ slot }: { slot: ExpertCreationSlot }) {
+  if (slot.status === "not_reached") return <span className="text-muted-foreground/30">–</span>;
+  if (slot.status === "done") {
+    return (
+      <div className="flex flex-col items-start gap-0.5">
+        <span className="text-xs font-semibold text-success">Done</span>
+        {slot.person && <span className="text-xs text-muted-foreground">{slot.person}</span>}
+      </div>
+    );
+  }
+  if (slot.status === "in_progress") {
+    return (
+      <div className="flex flex-col items-start gap-0.5">
+        <span className="text-xs font-semibold text-amber-700">In Progress</span>
+        {slot.person && <span className="text-xs text-muted-foreground">{slot.person}</span>}
+      </div>
+    );
+  }
+  return <span className="text-xs font-medium text-muted-foreground">Pending</span>;
 }
 
 const STAGES = [
@@ -76,6 +111,7 @@ const STAGES = [
 const STATUSES = ["connected", "rnr", "reconnect", "junk", "not_interested"];
 const VERDICTS = ["Passed", "Failed", "Pending"];
 type SortKey = "lead_date" | "priority" | "stage" | "updated";
+type DateDir = "asc" | "desc";
 const PAGE_SIZE = 100;
 const MAX_RENDERED = 300;
 
@@ -96,10 +132,16 @@ function AllLeadsPageInner() {
   const [status, setStatus] = React.useState(() => searchParams.get("status") ?? "");
   const [verdict, setVerdict] = React.useState("");
   const [sort, setSort] = React.useState<SortKey>("lead_date");
+  const [dateDir, setDateDir] = React.useState<DateDir>("desc");
+
+  function handleDateClick() {
+    setDateDir((d) => (sort === "lead_date" ? (d === "asc" ? "desc" : "asc") : "desc"));
+    setSort("lead_date");
+  }
 
   const baseFilters = React.useMemo(
-    () => ({ from: from || null, to: to || null, person: person || null, stage: stage || null, status: status || null, verdict: verdict || null, sort, limit: PAGE_SIZE }),
-    [from, to, person, stage, status, verdict, sort],
+    () => ({ from: from || null, to: to || null, person: person || null, stage: stage || null, status: status || null, verdict: verdict || null, sort, dateDir, limit: PAGE_SIZE }),
+    [from, to, person, stage, status, verdict, sort, dateDir],
   );
 
   const peopleQ = useQuery({ queryKey: ["admin-people"], queryFn: () => listAllPeople() });
@@ -115,6 +157,8 @@ function AllLeadsPageInner() {
   const allRows = React.useMemo(() => (infiniteQ.data?.pages ?? []).flatMap((p) => p.rows), [infiniteQ.data]);
   const visibleRows = React.useMemo(() => (allRows.length > MAX_RENDERED ? allRows.slice(allRows.length - MAX_RENDERED) : allRows), [allRows]);
   const total = infiniteQ.data?.pages[0]?.total ?? 0;
+  const numRounds = infiniteQ.data?.pages[0]?.num_rounds ?? 2;
+  const roundNumbers = React.useMemo(() => Array.from({ length: numRounds }, (_, i) => i + 1), [numRounds]);
   const loaded = allRows.length;
   const trimmed = allRows.length - visibleRows.length;
 
@@ -140,6 +184,15 @@ function AllLeadsPageInner() {
     return (
       <TableHead className={`cursor-pointer select-none ${active ? "text-foreground" : ""}`} onClick={() => setSort(k)}>
         {label}{active ? " ↓" : ""}
+      </TableHead>
+    );
+  }
+
+  function DateSortTh() {
+    const active = sort === "lead_date";
+    return (
+      <TableHead className={`cursor-pointer select-none ${active ? "text-foreground" : ""}`} onClick={handleDateClick}>
+        Lead Date{active ? (dateDir === "asc" ? " ↑" : " ↓") : ""}
       </TableHead>
     );
   }
@@ -227,21 +280,12 @@ function AllLeadsPageInner() {
                     <TableHead>Lead ID</TableHead>
                     <TableHead>Name</TableHead>
                     <TableHead>Contact</TableHead>
-                    <SortableTh k="lead_date" label="Lead Date" />
+                    <DateSortTh />
                     <TableHead>Caller</TableHead>
-                    <TableHead>Calling Status</TableHead>
-                    <TableHead>Round 1</TableHead>
-                    <TableHead>Round 2</TableHead>
-                    <TableHead>Verdict</TableHead>
                     <TableHead>Calling Attempts</TableHead>
-                    <TableHead>R1 Result</TableHead>
-                    <TableHead>R2 Result</TableHead>
+                    {roundNumbers.map((n) => <TableHead key={n}>Round {n}</TableHead>)}
+                    <TableHead>Expert Creation</TableHead>
                     <SortableTh k="stage" label="Current Stage" />
-                    <SortableTh k="updated" label="Last Updated" />
-                    <TableHead>Telecaller (Chain)</TableHead>
-                    <TableHead>R1 Taker (Chain)</TableHead>
-                    <TableHead>R2 Taker (Chain)</TableHead>
-                    <TableHead>Expert Creator (Chain)</TableHead>
                     <TableHead />
                   </TableRow>
                 </TableHeader>
@@ -254,28 +298,21 @@ function AllLeadsPageInner() {
                         <TableCell>{r.name}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">{r.contact}</TableCell>
                         <TableCell className="text-muted-foreground">{r.lead_date ?? "—"}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{r.caller}</TableCell>
-                        <TableCell>{r.calling_status}</TableCell>
-                        <TableCell>{r.round_1_status}</TableCell>
-                        <TableCell>{r.round_2_status}</TableCell>
-                        <TableCell>{r.verdict}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{r.caller || "—"}</TableCell>
                         <TableCell>
-                          <CallingAttemptsCell a1={r.attempt_1_outcome} a2={r.attempt_2_outcome} a3={r.attempt_3_outcome} />
+                          <CallingAttemptsCell attempts={r.attempts} />
                         </TableCell>
+                        {r.rounds.map((round, i) => (
+                          <TableCell key={i}>
+                            <RoundCell round={round} />
+                          </TableCell>
+                        ))}
                         <TableCell>
-                          <RoundResultCell result={r.r1_result} interviewer={r.r1_interviewer} />
-                        </TableCell>
-                        <TableCell>
-                          <RoundResultCell result={r.r2_result} interviewer={r.r2_interviewer} />
+                          <ExpertCreationCell slot={r.expert_creation} />
                         </TableCell>
                         <TableCell className="text-xs">
                           <StatusPill kind={pill.kind} label={pill.label} />
                         </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{r.updated_at ? new Date(r.updated_at).toLocaleString() : "—"}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{r.calling_assignee}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{r.round_1_assignee}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{r.round_2_assignee}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{r.expert_creation_assignee}</TableCell>
                         <TableCell className="text-right">
                           <Link href={`/leads/${r.id}`} className="text-xs font-medium text-primary hover:underline">View Lead</Link>
                         </TableCell>

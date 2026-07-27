@@ -351,6 +351,7 @@ const AllLeadsFilter = z.object({
   status: z.string().nullish(),
   verdict: z.string().nullish(),
   sort: SortKey.nullish(),
+  dateDir: z.enum(["asc", "desc"]).nullish(),
   cursor: z.string().nullish(),
   limit: z.number().int().min(1).max(200).nullish(),
 });
@@ -400,7 +401,7 @@ async function resolveJoinFilterIds(f: AllLeadsFilterT): Promise<Set<string> | n
   return sets.reduce((acc, s) => new Set([...acc].filter((x) => s.has(x))));
 }
 
-function sortToColumn(sort: SortKeyT): { col: string; asc: boolean } {
+function sortToColumn(sort: SortKeyT, dateDir?: "asc" | "desc" | null): { col: string; asc: boolean } {
   switch (sort) {
     case "priority":
       return { col: "priority", asc: true };
@@ -410,7 +411,7 @@ function sortToColumn(sort: SortKeyT): { col: string; asc: boolean } {
       return { col: "updated_at", asc: false };
     case "lead_date":
     default:
-      return { col: "lead_date", asc: false };
+      return { col: "lead_date", asc: (dateDir ?? "desc") === "asc" };
   }
 }
 
@@ -429,7 +430,7 @@ function decodeCursor(s: string): Cursor | null {
 async function queryLeadsPage(f: AllLeadsFilterT, limit: number) {
   const joinIds = await resolveJoinFilterIds(f);
   if (joinIds && joinIds.size === 0) return { leads: [] as Array<Record<string, unknown>>, total: 0, joinIds };
-  const sort = sortToColumn(f.sort ?? "lead_date");
+  const sort = sortToColumn(f.sort ?? "lead_date", f.dateDir);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function applyFilters(qb: any): any {
@@ -468,6 +469,10 @@ async function queryLeadsPage(f: AllLeadsFilterT, limit: number) {
   return { leads: (leads ?? []) as Array<Record<string, unknown>>, total: count ?? 0, joinIds };
 }
 
+type AttemptSlot = { outcome: string; by: string };
+type RoundSlot = { status: "done" | "pending_assigned" | "not_reached"; passed: boolean | null; person: string };
+type ExpertCreationSlot = { status: "done" | "in_progress" | "pending" | "not_reached"; person: string };
+
 type ListRow = {
   id: string;
   lead_id: string;
@@ -476,80 +481,89 @@ type ListRow = {
   lead_date: string | null;
   priority: number;
   caller: string;
-  calling_status: string;
-  round_1_status: string;
-  round_2_status: string;
-  verdict: string;
   current_stage: string;
   updated_at: string;
-  calling_assignee: string;
-  round_1_assignee: string;
-  round_2_assignee: string;
-  expert_creation_assignee: string;
-  attempt_1_outcome: string;
-  attempt_2_outcome: string;
-  attempt_3_outcome: string;
-  r1_result: "passed" | "failed" | "";
-  r1_interviewer: string;
-  r2_result: "passed" | "failed" | "";
-  r2_interviewer: string;
+  attempts: AttemptSlot[];
+  rounds: RoundSlot[];
+  expert_creation: ExpertCreationSlot;
 };
 
-function roundLabel(r: { passed: boolean | null; submitted_at: string | null } | undefined): string {
-  if (!r) return "—";
-  if (r.passed === true) return "Passed";
-  if (r.passed === false) return "Failed";
-  if (r.submitted_at) return "Submitted";
-  return "In Progress";
-}
-
-async function enrichLeads(leads: Array<Record<string, unknown>>): Promise<ListRow[]> {
+async function enrichLeads(leads: Array<Record<string, unknown>>, numRounds: number): Promise<ListRow[]> {
   if (leads.length === 0) return [];
   const ids = leads.map((l) => l.id as string);
-  const [{ data: cs }, { data: rounds }, { data: assignments }, { data: users }, { data: attempts }] = await Promise.all([
-    supabaseAdmin.from("calling_status").select("lead_id, status").in("lead_id", ids),
-    supabaseAdmin.from("interview_rounds").select("lead_id, round_number, passed, submitted_at, conducted_by").in("lead_id", ids).in("round_number", [1, 2]),
+  const roundNumbers = Array.from({ length: numRounds }, (_, i) => i + 1);
+
+  const [{ data: assignments }, { data: users }, { data: attempts }, { data: rounds }, { data: profiles }] = await Promise.all([
     supabaseAdmin.from("lead_stage_assignments").select("lead_id, stage, assigned_email").in("lead_id", ids),
     supabaseAdmin.from("users").select("email, name"),
-    supabaseAdmin.from("call_attempts").select("lead_id, attempt_number, outcome").in("lead_id", ids),
+    supabaseAdmin.from("call_attempts").select("lead_id, attempt_number, outcome, attempted_by").in("lead_id", ids),
+    supabaseAdmin.from("interview_rounds").select("lead_id, round_number, passed, submitted_at, conducted_by").in("lead_id", ids).in("round_number", roundNumbers),
+    supabaseAdmin.from("expert_profiles").select("lead_id, linked_by").in("lead_id", ids),
   ]);
+
   const nameByEmail = new Map((users ?? []).map((u) => [u.email, u.name]));
-  const resolve = (email: string | null | undefined) => (email ? (nameByEmail.get(email) ?? email) : "—");
-  const csBy = new Map((cs ?? []).map((s) => [s.lead_id, s]));
-  const r1By = new Map<string, { passed: boolean | null; submitted_at: string | null; conducted_by: string }>();
-  const r2By = new Map<string, { passed: boolean | null; submitted_at: string | null; conducted_by: string }>();
-  for (const r of rounds ?? []) {
-    if (r.round_number === 1) r1By.set(r.lead_id, r);
-    else if (r.round_number === 2) r2By.set(r.lead_id, r);
-  }
+  const resolve = (email: string | null | undefined) => (email ? (nameByEmail.get(email) ?? email) : "");
+
   const chainBy = new Map<string, Record<string, string>>();
   for (const a of assignments ?? []) {
     const m = chainBy.get(a.lead_id) ?? {};
     m[a.stage] = a.assigned_email;
     chainBy.set(a.lead_id, m);
   }
-  const attemptsBy = new Map<string, Record<number, string>>();
+
+  const attemptsBy = new Map<string, Record<number, { outcome: string; attempted_by: string }>>();
   for (const a of attempts ?? []) {
     const m = attemptsBy.get(a.lead_id) ?? {};
-    m[a.attempt_number] = a.outcome ?? "";
+    m[a.attempt_number] = { outcome: a.outcome ?? "", attempted_by: a.attempted_by };
     attemptsBy.set(a.lead_id, m);
   }
-  const roundResult = (r: { passed: boolean | null } | undefined): "passed" | "failed" | "" =>
-    r?.passed === true ? "passed" : r?.passed === false ? "failed" : "";
+
+  const roundsBy = new Map<string, Record<number, { passed: boolean | null; submitted_at: string | null; conducted_by: string }>>();
+  for (const r of rounds ?? []) {
+    const m = roundsBy.get(r.lead_id) ?? {};
+    m[r.round_number] = r;
+    roundsBy.set(r.lead_id, m);
+  }
+
+  const profileByLead = new Map((profiles ?? []).map((p) => [p.lead_id, p]));
 
   return leads.map((l) => {
     const id = l.id as string;
     const stage = l.current_stage as string;
-    const r1 = r1By.get(id);
-    const r2 = r2By.get(id);
     const chain = chainBy.get(id) ?? {};
-    const attemptOutcomes = attemptsBy.get(id) ?? {};
-    const verdict =
-      stage === "active" || stage === "profile_created" || stage === "profile_creation_pending"
-        ? "Passed"
-        : stage === "failed"
-          ? "Failed"
-          : "Pending";
+    const attemptMap = attemptsBy.get(id) ?? {};
+    const roundMap = roundsBy.get(id) ?? {};
+    const profile = profileByLead.get(id);
+
+    const attemptSlots: AttemptSlot[] = [1, 2, 3].map((n) => {
+      const a = attemptMap[n];
+      return a ? { outcome: a.outcome, by: resolve(a.attempted_by) } : { outcome: "", by: "" };
+    });
+
+    const roundSlots: RoundSlot[] = roundNumbers.map((n) => {
+      const r = roundMap[n];
+      const assignedEmail = chain[`round_${n}`];
+      if (r?.submitted_at) {
+        return { status: "done", passed: r.passed, person: resolve(r.conducted_by) };
+      }
+      if (assignedEmail) {
+        return { status: "pending_assigned", passed: null, person: resolve(assignedEmail) };
+      }
+      return { status: "not_reached", passed: null, person: "" };
+    });
+
+    let expertCreation: ExpertCreationSlot;
+    if (profile) {
+      expertCreation = { status: "done", person: resolve(profile.linked_by) };
+    } else if (stage === "profile_creation_pending") {
+      const assignedEmail = chain.expert_creation;
+      expertCreation = assignedEmail
+        ? { status: "in_progress", person: resolve(assignedEmail) }
+        : { status: "pending", person: "" };
+    } else {
+      expertCreation = { status: "not_reached", person: "" };
+    }
+
     return {
       id,
       lead_id: l.lead_id as string,
@@ -558,23 +572,11 @@ async function enrichLeads(leads: Array<Record<string, unknown>>): Promise<ListR
       lead_date: (l.lead_date as string) ?? null,
       priority: l.priority as number,
       caller: resolve(l.assigned_to_email as string | null),
-      calling_status: (csBy.get(id)?.status as string) ?? "—",
-      round_1_status: roundLabel(r1),
-      round_2_status: roundLabel(r2),
-      verdict,
       current_stage: stage,
       updated_at: l.updated_at as string,
-      calling_assignee: resolve(chain.calling),
-      round_1_assignee: resolve(chain.round_1),
-      round_2_assignee: resolve(chain.round_2),
-      expert_creation_assignee: resolve(chain.expert_creation),
-      attempt_1_outcome: attemptOutcomes[1] ?? "",
-      attempt_2_outcome: attemptOutcomes[2] ?? "",
-      attempt_3_outcome: attemptOutcomes[3] ?? "",
-      r1_result: roundResult(r1),
-      r1_interviewer: r1?.conducted_by ? resolve(r1.conducted_by) : "",
-      r2_result: roundResult(r2),
-      r2_interviewer: r2?.conducted_by ? resolve(r2.conducted_by) : "",
+      attempts: attemptSlots,
+      rounds: roundSlots,
+      expert_creation: expertCreation,
     };
   });
 }
@@ -587,8 +589,8 @@ export async function listAllLeads(input: AllLeadsFilterT) {
   const { leads, total } = await queryLeadsPage(f, limit);
   const hasMore = leads.length > limit;
   const page = hasMore ? leads.slice(0, limit) : leads;
-  const rows = await enrichLeads(page);
-  const sort = sortToColumn(f.sort ?? "lead_date");
+  const rows = await enrichLeads(page, numRounds);
+  const sort = sortToColumn(f.sort ?? "lead_date", f.dateDir);
   let nextCursor: string | null = null;
   if (hasMore && page.length > 0) {
     const last = page[page.length - 1] as Record<string, unknown>;
@@ -600,15 +602,29 @@ export async function listAllLeads(input: AllLeadsFilterT) {
 export async function exportLeadsCsv(input: AllLeadsFilterT) {
   const f = AllLeadsFilter.parse(input);
   await requireRole(["admin", "kam", "lma"]);
+  const numRounds = await loadNumRounds();
   const esc = (v: unknown) => {
     const s = v == null ? "" : String(v);
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
+  const roundStatusLabel = (r: { status: string; passed: boolean | null }): string => {
+    if (r.status === "done") return r.passed ? "Passed" : "Failed";
+    if (r.status === "pending_assigned") return "Yet to take";
+    return "";
+  };
+  const expertStatusLabel: Record<string, string> = {
+    done: "Done",
+    in_progress: "In Progress",
+    pending: "Pending",
+    not_reached: "",
+  };
+
   const header = [
     "lead_id", "name", "contact", "lead_date", "caller",
-    "calling_status", "round_1_status", "round_2_status",
-    "verdict", "current_stage", "updated_at",
-    "calling_assignee", "round_1_assignee", "round_2_assignee", "expert_creation_assignee",
+    "attempt_1_outcome", "attempt_1_by", "attempt_2_outcome", "attempt_2_by", "attempt_3_outcome", "attempt_3_by",
+    ...Array.from({ length: numRounds }, (_, i) => [`round_${i + 1}_status`, `round_${i + 1}_person`]).flat(),
+    "expert_creation_status", "expert_creation_person",
+    "current_stage", "updated_at",
   ];
   const lines: string[] = [header.join(",")];
 
@@ -620,19 +636,22 @@ export async function exportLeadsCsv(input: AllLeadsFilterT) {
     const { leads } = await queryLeadsPage(pageF, CHUNK);
     const hasMore = leads.length > CHUNK;
     const page = hasMore ? leads.slice(0, CHUNK) : leads;
-    const rows = await enrichLeads(page);
+    const rows = await enrichLeads(page, numRounds);
     for (const r of rows) {
       lines.push(
         [
           r.lead_id, r.name, r.contact, r.lead_date ?? "", r.caller,
-          r.calling_status, r.round_1_status, r.round_2_status,
-          r.verdict, r.current_stage, r.updated_at,
-          r.calling_assignee, r.round_1_assignee, r.round_2_assignee, r.expert_creation_assignee,
+          r.attempts[0]?.outcome ?? "", r.attempts[0]?.by ?? "",
+          r.attempts[1]?.outcome ?? "", r.attempts[1]?.by ?? "",
+          r.attempts[2]?.outcome ?? "", r.attempts[2]?.by ?? "",
+          ...r.rounds.flatMap((round) => [roundStatusLabel(round), round.person]),
+          expertStatusLabel[r.expert_creation.status] ?? "", r.expert_creation.person,
+          r.current_stage, r.updated_at,
         ].map(esc).join(","),
       );
     }
     if (!hasMore) break;
-    const sort = sortToColumn(f.sort ?? "lead_date");
+    const sort = sortToColumn(f.sort ?? "lead_date", f.dateDir);
     const last = page[page.length - 1] as Record<string, unknown>;
     cursor = encodeCursor({ v: (last[sort.col] as string | number | null) ?? null, id: last.id as string });
     safety--;

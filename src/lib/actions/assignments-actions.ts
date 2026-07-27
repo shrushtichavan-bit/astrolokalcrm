@@ -16,6 +16,7 @@ const AllotmentFilters = z.object({
   languages: z.array(z.string()).nullish(),
   from: z.string().nullish(),
   to: z.string().nullish(),
+  dateDir: z.enum(["asc", "desc"]).nullish(),
 });
 type AllotmentFiltersT = z.infer<typeof AllotmentFilters>;
 
@@ -55,7 +56,7 @@ export async function getUnassignedTelecallerLeads(input: AllotmentFiltersT & { 
       .select("id, lead_id, name, contact, source, priority, lead_date, language")
       .is("assigned_to_email", null)
       .order("priority", { ascending: true })
-      .order("lead_date", { ascending: true })
+      .order("lead_date", { ascending: (rest.dateDir ?? "asc") === "asc" })
       .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1),
     rest,
   );
@@ -98,7 +99,7 @@ export async function getAssignedTelecallerLeads(input: AllotmentFiltersT & { pa
       .select("id, lead_id, name, contact, source, priority, lead_date, language, assigned_to_email")
       .not("assigned_to_email", "is", null)
       .order("priority", { ascending: true })
-      .order("lead_date", { ascending: true })
+      .order("lead_date", { ascending: (rest.dateDir ?? "asc") === "asc" })
       .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1),
     rest,
   );
@@ -140,14 +141,40 @@ export async function assignTelecallerBulk(input: { lead_ids: string[]; telecall
   const u = await requireRole(["admin", "kam"]);
   const telecaller = data.telecaller_email.toLowerCase();
 
+  // assigned_to_email is the "telecaller of record" — always safe to set,
+  // it's a historical/reporting field. current_owner_email (and the
+  // matching lead_stage_assignments row) must only move for leads still
+  // actually waiting on a telecaller: a lead that's already progressed to
+  // a round or expert creation is rightfully owned by whoever's working
+  // THAT stage, and reassigning "the telecaller" here must never evict
+  // them — doing so previously left current_owner_email and
+  // lead_stage_assignments pointing at two different people.
+  const { data: leads, error: fetchErr } = await supabaseAdmin
+    .from("leads")
+    .select("id, current_stage")
+    .in("id", data.lead_ids);
+  if (fetchErr) throw new Error(fetchErr.message);
+  const stillCalling = (leads ?? []).filter((l) => l.current_stage === "calling_pending").map((l) => l.id);
+
   const { error } = await supabaseAdmin
     .from("leads")
-    .update({ assigned_to_email: telecaller, current_owner_email: telecaller })
+    .update({ assigned_to_email: telecaller })
     .in("id", data.lead_ids);
   if (error) throw new Error(error.message);
 
+  if (stillCalling.length > 0) {
+    const { error: ownerErr } = await supabaseAdmin
+      .from("leads")
+      .update({ current_owner_email: telecaller })
+      .in("id", stillCalling);
+    if (ownerErr) throw new Error(ownerErr.message);
+  }
+
+  const stillCallingSet = new Set(stillCalling);
   for (const leadId of data.lead_ids) {
-    await recordStageAssignment(leadId, "calling", telecaller, u.email);
+    if (stillCallingSet.has(leadId)) {
+      await recordStageAssignment(leadId, "calling", telecaller, u.email);
+    }
     await appendAudit(leadId, "telecaller_assigned", u.email, { telecaller });
   }
 
