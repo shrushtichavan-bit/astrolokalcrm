@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Users2, Check, X } from "lucide-react";
+import { Users2, Check, X, Search } from "lucide-react";
 import { listAllLeads, listAllPeople, exportLeadsCsv } from "@/lib/actions/admin-actions";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
@@ -132,6 +132,12 @@ export default function AllLeadsPage() {
 
 function AllLeadsPageInner() {
   const searchParams = useSearchParams();
+  const [search, setSearch] = React.useState("");
+  const [debouncedSearch, setDebouncedSearch] = React.useState("");
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 250);
+    return () => clearTimeout(t);
+  }, [search]);
   const [from, setFrom] = React.useState("");
   const [to, setTo] = React.useState("");
   const [person, setPerson] = React.useState("");
@@ -162,8 +168,12 @@ function AllLeadsPageInner() {
   }
 
   const baseFilters = React.useMemo(
-    () => ({ from: from || null, to: to || null, person: person || null, stage: stage || null, status: status || null, verdict: verdict || null, sort, dateDir, limit: PAGE_SIZE }),
-    [from, to, person, stage, status, verdict, sort, dateDir],
+    () => ({
+      from: from || null, to: to || null, person: person || null, stage: stage || null, status: status || null, verdict: verdict || null,
+      search: debouncedSearch || null,
+      sort, dateDir, limit: PAGE_SIZE,
+    }),
+    [from, to, person, stage, status, verdict, debouncedSearch, sort, dateDir],
   );
 
   const peopleQ = useQuery({ queryKey: ["admin-people"], queryFn: () => listAllPeople() });
@@ -226,6 +236,15 @@ function AllLeadsPageInner() {
     <div>
       <div ref={topBarRef} className="sticky top-0 z-20 bg-background pb-1">
       <PageHeader title="All Leads" description="Every lead, every stage — sortable, filterable, exportable." />
+      <div className="relative mb-4">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by Lead ID, name, or contact number…"
+          className="pl-9"
+        />
+      </div>
       <Card className="mb-4">
         <CardContent className="grid grid-cols-2 gap-3 p-4 md:grid-cols-4 lg:grid-cols-7">
           <div><Label className="text-xs">From</Label><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></div>

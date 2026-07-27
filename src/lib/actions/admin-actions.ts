@@ -350,6 +350,7 @@ const AllLeadsFilter = z.object({
   stage: z.string().nullish(),
   status: z.string().nullish(),
   verdict: z.string().nullish(),
+  search: z.string().nullish(),
   sort: SortKey.nullish(),
   dateDir: z.enum(["asc", "desc"]).nullish(),
   cursor: z.string().nullish(),
@@ -439,6 +440,8 @@ async function queryLeadsPage(f: AllLeadsFilterT, limit: number) {
     if (f.to) q = q.lte("lead_date", f.to);
     if (f.stage) q = q.eq("current_stage", f.stage);
     if (joinIds) q = q.in("id", Array.from(joinIds).slice(0, 1000));
+    const term = f.search?.trim().replace(/[,()]/g, "");
+    if (term) q = q.or(`lead_id.ilike.%${term}%,name.ilike.%${term}%,contact.ilike.%${term}%`);
     return q;
   }
 
