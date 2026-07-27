@@ -30,7 +30,10 @@ function formatLeadDate(dateStr: string | null): string {
   if (!dateStr) return "—";
   const d = new Date(dateStr);
   if (Number.isNaN(d.getTime())) return dateStr;
-  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const year = String(d.getFullYear()).slice(-2);
+  return `${day}/${month}/${year}`;
 }
 
 function attemptChipClass(outcome: string): string {
@@ -128,7 +131,8 @@ const MAX_RENDERED = 300;
 // of relying on independent auto-sizing per table.
 function useColumnWidths(numRounds: number) {
   return React.useMemo(
-    () => [140, 170, 110, 112, 140, 260, ...Array.from({ length: numRounds }, () => 140), 150, 150, 90],
+    // Lead ID, Name, Contact, Lead Date, Caller, Calling Attempts, Round 1..N, Expert Creation, Current Stage, View Lead
+    () => [160, 160, 120, 90, 100, 180, ...Array.from({ length: numRounds }, () => 100), 120, 130, 80],
     [numRounds],
   );
 }
@@ -223,7 +227,7 @@ function AllLeadsPageInner() {
   function SortableTh({ k, label }: { k: SortKey; label: string }) {
     const active = sort === k;
     return (
-      <TableHead className={`cursor-pointer select-none ${active ? "text-foreground" : ""}`} onClick={() => setSort(k)}>
+      <TableHead className={`cursor-pointer select-none px-2 py-2 ${active ? "text-foreground" : ""}`} onClick={() => setSort(k)}>
         {label}{active ? " ↓" : ""}
       </TableHead>
     );
@@ -232,7 +236,10 @@ function AllLeadsPageInner() {
   function DateSortTh() {
     const active = sort === "lead_date";
     return (
-      <TableHead className={`cursor-pointer select-none whitespace-nowrap ${active ? "text-foreground" : ""}`} onClick={handleDateClick}>
+      <TableHead
+        className={`cursor-pointer select-none whitespace-nowrap px-2 py-2 ${active ? "text-foreground" : ""}`}
+        onClick={handleDateClick}
+      >
         Lead Date{active ? (dateDir === "asc" ? " ↑" : " ↓") : ""}
       </TableHead>
     );
@@ -338,16 +345,16 @@ function AllLeadsPageInner() {
                 {colgroup}
                 <TableHeader className="[&_tr]:border-b-0">
                   <TableRow>
-                    <TableHead>Lead ID</TableHead>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Contact</TableHead>
+                    <TableHead className="px-2 py-2">Lead ID</TableHead>
+                    <TableHead className="px-2 py-2">Name</TableHead>
+                    <TableHead className="px-2 py-2">Contact</TableHead>
                     <DateSortTh />
-                    <TableHead>Caller</TableHead>
-                    <TableHead>Calling Attempts</TableHead>
-                    {roundNumbers.map((n) => <TableHead key={n}>Round {n}</TableHead>)}
-                    <TableHead>Expert Creation</TableHead>
+                    <TableHead className="px-2 py-2">Caller</TableHead>
+                    <TableHead className="px-2 py-2">Calling Attempts</TableHead>
+                    {roundNumbers.map((n) => <TableHead key={n} className="px-2 py-2">Round {n}</TableHead>)}
+                    <TableHead className="px-2 py-2">Expert Creation</TableHead>
                     <SortableTh k="stage" label="Current Stage" />
-                    <TableHead />
+                    <TableHead className="px-2 py-2" />
                   </TableRow>
                 </TableHeader>
               </table>
@@ -360,26 +367,26 @@ function AllLeadsPageInner() {
                     const pill = stageToPill(r.current_stage);
                     return (
                       <TableRow key={r.id} className="h-12 transition-colors hover:bg-accent/50">
-                        <TableCell className="truncate font-mono text-[11px]">{r.lead_id}</TableCell>
-                        <TableCell className="truncate">{r.name}</TableCell>
-                        <TableCell className="truncate text-xs text-muted-foreground">{r.contact}</TableCell>
-                        <TableCell className="whitespace-nowrap text-muted-foreground">{formatLeadDate(r.lead_date)}</TableCell>
-                        <TableCell className="truncate text-xs text-muted-foreground">{r.caller || "—"}</TableCell>
-                        <TableCell>
+                        <TableCell className="truncate px-2 py-2 font-mono text-[11px]">{r.lead_id}</TableCell>
+                        <TableCell className="truncate px-2 py-2">{r.name}</TableCell>
+                        <TableCell className="truncate px-2 py-2 text-xs text-muted-foreground">{r.contact}</TableCell>
+                        <TableCell className="whitespace-nowrap px-2 py-2 text-muted-foreground">{formatLeadDate(r.lead_date)}</TableCell>
+                        <TableCell className="truncate px-2 py-2 text-xs text-muted-foreground">{r.caller || "—"}</TableCell>
+                        <TableCell className="px-2 py-2">
                           <CallingAttemptsCell attempts={r.attempts} />
                         </TableCell>
                         {r.rounds.map((round, i) => (
-                          <TableCell key={i}>
+                          <TableCell key={i} className="px-2 py-2">
                             <RoundCell round={round} />
                           </TableCell>
                         ))}
-                        <TableCell>
+                        <TableCell className="px-2 py-2">
                           <ExpertCreationCell slot={r.expert_creation} />
                         </TableCell>
-                        <TableCell className="text-xs">
+                        <TableCell className="px-2 py-2 text-xs">
                           <StatusPill kind={pill.kind} label={pill.label} />
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="px-2 py-2 text-right">
                           <Link href={`/leads/${r.id}`} className="text-xs font-medium text-primary hover:underline">View Lead</Link>
                         </TableCell>
                       </TableRow>
