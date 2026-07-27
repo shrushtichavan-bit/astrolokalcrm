@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { TableHeader, TableBody, TableCell, TableHead, TableRow } from "@/components/ui/table";
 
 const ATTEMPT_CHIP_LABELS: Record<string, string> = {
   connected: "Connected",
@@ -51,7 +51,7 @@ function AttemptSlotCell({ slot }: { slot: AttemptSlot }) {
       <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ${attemptChipClass(slot.outcome)}`}>
         {ATTEMPT_CHIP_LABELS[slot.outcome] ?? slot.outcome}
       </span>
-      {slot.by && <span className="text-xs text-muted-foreground">{slot.by}</span>}
+      {slot.by && <span className="truncate text-xs text-muted-foreground">{slot.by}</span>}
     </div>
   );
 }
@@ -70,7 +70,7 @@ function RoundCell({ round }: { round: RoundSlot }) {
     return (
       <div className="flex flex-col items-start gap-0.5">
         <span className="text-xs font-medium text-muted-foreground">Yet to take</span>
-        {round.person && <span className="text-xs text-muted-foreground">{round.person}</span>}
+        {round.person && <span className="truncate text-xs text-muted-foreground">{round.person}</span>}
       </div>
     );
   }
@@ -85,7 +85,7 @@ function RoundCell({ round }: { round: RoundSlot }) {
           <X className="h-3.5 w-3.5 text-destructive/70" strokeWidth={2.5} />
         </span>
       )}
-      {round.person && <span className="text-xs text-muted-foreground">{round.person}</span>}
+      {round.person && <span className="truncate text-xs text-muted-foreground">{round.person}</span>}
     </div>
   );
 }
@@ -96,7 +96,7 @@ function ExpertCreationCell({ slot }: { slot: ExpertCreationSlot }) {
     return (
       <div className="flex flex-col items-start gap-0.5">
         <span className="text-xs font-semibold text-success">Done</span>
-        {slot.person && <span className="text-xs text-muted-foreground">{slot.person}</span>}
+        {slot.person && <span className="truncate text-xs text-muted-foreground">{slot.person}</span>}
       </div>
     );
   }
@@ -104,7 +104,7 @@ function ExpertCreationCell({ slot }: { slot: ExpertCreationSlot }) {
     return (
       <div className="flex flex-col items-start gap-0.5">
         <span className="text-xs font-semibold text-amber-700">In Progress</span>
-        {slot.person && <span className="text-xs text-muted-foreground">{slot.person}</span>}
+        {slot.person && <span className="truncate text-xs text-muted-foreground">{slot.person}</span>}
       </div>
     );
   }
@@ -122,9 +122,20 @@ type DateDir = "asc" | "desc";
 const PAGE_SIZE = 100;
 const MAX_RENDERED = 300;
 
+// Fixed pixel widths for every column, in render order. Shared between the
+// (non-scrolling) header table and the (scrolling) body table via matching
+// <colgroup>s — this is what keeps the two tables' columns aligned instead
+// of relying on independent auto-sizing per table.
+function useColumnWidths(numRounds: number) {
+  return React.useMemo(
+    () => [140, 170, 110, 112, 140, 260, ...Array.from({ length: numRounds }, () => 140), 150, 150, 90],
+    [numRounds],
+  );
+}
+
 export default function AllLeadsPage() {
   return (
-    <React.Suspense fallback={<Skeleton className="h-64 w-full" />}>
+    <React.Suspense fallback={<Skeleton className="h-full w-full" />}>
       <AllLeadsPageInner />
     </React.Suspense>
   );
@@ -147,20 +158,17 @@ function AllLeadsPageInner() {
   const [sort, setSort] = React.useState<SortKey>("lead_date");
   const [dateDir, setDateDir] = React.useState<DateDir>("desc");
 
-  // The filters/title block above the table is sticky; the table's own
-  // header sticks right below it. Its height is measured (it can wrap
-  // across screen sizes) so the table header knows how far down to stick.
-  const topBarRef = React.useRef<HTMLDivElement>(null);
-  const [topBarHeight, setTopBarHeight] = React.useState(0);
-  React.useLayoutEffect(() => {
-    const el = topBarRef.current;
-    if (!el) return;
-    const update = () => setTopBarHeight(el.offsetHeight);
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+  // The body table scrolls both ways; the header table only ever scrolls
+  // horizontally, and only because we mirror the body's scrollLeft onto it
+  // (it has no scrollbar of its own) — that's what keeps the header's
+  // columns lined up with the body's as the user scrolls sideways.
+  const headerScrollRef = React.useRef<HTMLDivElement>(null);
+  const bodyScrollRef = React.useRef<HTMLDivElement>(null);
+  function syncHeaderScroll() {
+    if (headerScrollRef.current && bodyScrollRef.current) {
+      headerScrollRef.current.scrollLeft = bodyScrollRef.current.scrollLeft;
+    }
+  }
 
   function handleDateClick() {
     setDateDir((d) => (sort === "lead_date" ? (d === "asc" ? "desc" : "asc") : "desc"));
@@ -191,6 +199,7 @@ function AllLeadsPageInner() {
   const total = infiniteQ.data?.pages[0]?.total ?? 0;
   const numRounds = infiniteQ.data?.pages[0]?.num_rounds ?? 2;
   const roundNumbers = React.useMemo(() => Array.from({ length: numRounds }, (_, i) => i + 1), [numRounds]);
+  const columnWidths = useColumnWidths(numRounds);
   const loaded = allRows.length;
   const trimmed = allRows.length - visibleRows.length;
 
@@ -223,105 +232,111 @@ function AllLeadsPageInner() {
   function DateSortTh() {
     const active = sort === "lead_date";
     return (
-      <TableHead
-        className={`w-28 cursor-pointer select-none whitespace-nowrap ${active ? "text-foreground" : ""}`}
-        onClick={handleDateClick}
-      >
+      <TableHead className={`cursor-pointer select-none whitespace-nowrap ${active ? "text-foreground" : ""}`} onClick={handleDateClick}>
         Lead Date{active ? (dateDir === "asc" ? " ↑" : " ↓") : ""}
       </TableHead>
     );
   }
 
+  const colgroup = (
+    <colgroup>
+      {columnWidths.map((w, i) => <col key={i} style={{ width: w }} />)}
+    </colgroup>
+  );
+
   return (
-    <div>
-      <div ref={topBarRef} className="sticky top-0 z-20 bg-background pb-1">
-      <PageHeader title="All Leads" description="Every lead, every stage — sortable, filterable, exportable." />
-      <div className="relative mb-4">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by Lead ID, name, or contact number…"
-          className="pl-9"
-        />
-      </div>
-      <Card className="mb-4">
-        <CardContent className="grid grid-cols-2 gap-3 p-4 md:grid-cols-4 lg:grid-cols-7">
-          <div><Label className="text-xs">From</Label><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></div>
-          <div><Label className="text-xs">To</Label><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></div>
-          <div>
-            <Label className="text-xs">Person</Label>
-            <Select value={person || "__all"} onValueChange={(v) => setPerson(v === "__all" ? "" : v)}>
-              <SelectTrigger><SelectValue placeholder="All" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all">All</SelectItem>
-                {(peopleQ.data?.people ?? []).map((p) => <SelectItem key={p.email} value={p.email}>{p.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label className="text-xs">Stage</Label>
-            <Select value={stage || "__all"} onValueChange={(v) => setStage(v === "__all" ? "" : v)}>
-              <SelectTrigger><SelectValue placeholder="All" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all">All</SelectItem>
-                {STAGES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label className="text-xs">Status</Label>
-            <Select value={status || "__all"} onValueChange={(v) => setStatus(v === "__all" ? "" : v)}>
-              <SelectTrigger><SelectValue placeholder="All" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all">All</SelectItem>
-                {STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label className="text-xs">Verdict</Label>
-            <Select value={verdict || "__all"} onValueChange={(v) => setVerdict(v === "__all" ? "" : v)}>
-              <SelectTrigger><SelectValue placeholder="All" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all">All</SelectItem>
-                {VERDICTS.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label className="text-xs">Sort by</Label>
-            <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="lead_date">Lead date</SelectItem>
-                <SelectItem value="priority">Priority</SelectItem>
-                <SelectItem value="stage">Stage</SelectItem>
-                <SelectItem value="updated">Last updated</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
-      <div className="mb-3 flex items-center justify-between">
-        <div className="text-sm text-muted-foreground">
-          {infiniteQ.isLoading ? "Loading…" : `Showing ${loaded.toLocaleString()} of ${total.toLocaleString()} leads`}
-          {trimmed > 0 && <span className="ml-2 text-xs">(oldest {trimmed} hidden to keep table fast)</span>}
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      {/* Fixed block: title, search, filters, count + export. Never scrolls. */}
+      <div className="shrink-0">
+        <PageHeader title="All Leads" description="Every lead, every stage — sortable, filterable, exportable." />
+        <div className="relative mb-4">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by Lead ID, name, or contact number…"
+            className="pl-9"
+          />
         </div>
-        <Button size="sm" variant="outline" onClick={downloadCsv}>Export CSV</Button>
-      </div>
+        <Card className="mb-4">
+          <CardContent className="grid grid-cols-2 gap-3 p-4 md:grid-cols-4 lg:grid-cols-7">
+            <div><Label className="text-xs">From</Label><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></div>
+            <div><Label className="text-xs">To</Label><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></div>
+            <div>
+              <Label className="text-xs">Person</Label>
+              <Select value={person || "__all"} onValueChange={(v) => setPerson(v === "__all" ? "" : v)}>
+                <SelectTrigger><SelectValue placeholder="All" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all">All</SelectItem>
+                  {(peopleQ.data?.people ?? []).map((p) => <SelectItem key={p.email} value={p.email}>{p.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs">Stage</Label>
+              <Select value={stage || "__all"} onValueChange={(v) => setStage(v === "__all" ? "" : v)}>
+                <SelectTrigger><SelectValue placeholder="All" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all">All</SelectItem>
+                  {STAGES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs">Status</Label>
+              <Select value={status || "__all"} onValueChange={(v) => setStatus(v === "__all" ? "" : v)}>
+                <SelectTrigger><SelectValue placeholder="All" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all">All</SelectItem>
+                  {STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs">Verdict</Label>
+              <Select value={verdict || "__all"} onValueChange={(v) => setVerdict(v === "__all" ? "" : v)}>
+                <SelectTrigger><SelectValue placeholder="All" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all">All</SelectItem>
+                  {VERDICTS.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs">Sort by</Label>
+              <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="lead_date">Lead date</SelectItem>
+                  <SelectItem value="priority">Priority</SelectItem>
+                  <SelectItem value="stage">Stage</SelectItem>
+                  <SelectItem value="updated">Last updated</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </CardContent>
+        </Card>
+        <div className="mb-3 flex items-center justify-between">
+          <div className="text-sm text-muted-foreground">
+            {infiniteQ.isLoading ? "Loading…" : `Showing ${loaded.toLocaleString()} of ${total.toLocaleString()} leads`}
+            {trimmed > 0 && <span className="ml-2 text-xs">(oldest {trimmed} hidden to keep table fast)</span>}
+          </div>
+          <Button size="sm" variant="outline" onClick={downloadCsv}>Export CSV</Button>
+        </div>
       </div>
 
-      {infiniteQ.isLoading ? (
-        <Skeleton className="h-64 w-full" />
-      ) : visibleRows.length === 0 ? (
-        <EmptyState icon={Users2} title="No leads match these filters" description="Try widening your date range or clearing filters." />
-      ) : (
-        <>
-          <Card>
-            <CardContent className="overflow-x-auto p-0">
-              <Table>
-                <TableHeader className="sticky z-10 bg-card" style={{ top: topBarHeight }}>
+      {/* Remaining space: only this area scrolls. */}
+      <div className="min-h-0 flex-1">
+        {infiniteQ.isLoading ? (
+          <Skeleton className="h-full w-full" />
+        ) : visibleRows.length === 0 ? (
+          <EmptyState icon={Users2} title="No leads match these filters" description="Try widening your date range or clearing filters." />
+        ) : (
+          <Card className="flex h-full min-h-0 flex-col overflow-hidden">
+            <div ref={headerScrollRef} className="shrink-0 overflow-hidden border-b border-border">
+              <table className="w-full table-fixed border-collapse text-sm">
+                {colgroup}
+                <TableHeader className="[&_tr]:border-b-0">
                   <TableRow>
                     <TableHead>Lead ID</TableHead>
                     <TableHead>Name</TableHead>
@@ -335,16 +350,21 @@ function AllLeadsPageInner() {
                     <TableHead />
                   </TableRow>
                 </TableHeader>
+              </table>
+            </div>
+            <div ref={bodyScrollRef} onScroll={syncHeaderScroll} className="min-h-0 flex-1 overflow-auto">
+              <table className="w-full table-fixed border-collapse text-sm">
+                {colgroup}
                 <TableBody>
                   {visibleRows.map((r) => {
                     const pill = stageToPill(r.current_stage);
                     return (
                       <TableRow key={r.id} className="h-12 transition-colors hover:bg-accent/50">
-                        <TableCell className="font-mono text-[11px]">{r.lead_id}</TableCell>
-                        <TableCell>{r.name}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{r.contact}</TableCell>
-                        <TableCell className="w-28 whitespace-nowrap text-muted-foreground">{formatLeadDate(r.lead_date)}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{r.caller || "—"}</TableCell>
+                        <TableCell className="truncate font-mono text-[11px]">{r.lead_id}</TableCell>
+                        <TableCell className="truncate">{r.name}</TableCell>
+                        <TableCell className="truncate text-xs text-muted-foreground">{r.contact}</TableCell>
+                        <TableCell className="whitespace-nowrap text-muted-foreground">{formatLeadDate(r.lead_date)}</TableCell>
+                        <TableCell className="truncate text-xs text-muted-foreground">{r.caller || "—"}</TableCell>
                         <TableCell>
                           <CallingAttemptsCell attempts={r.attempts} />
                         </TableCell>
@@ -366,20 +386,20 @@ function AllLeadsPageInner() {
                     );
                   })}
                 </TableBody>
-              </Table>
-            </CardContent>
+              </table>
+              <div className="flex justify-center py-4">
+                {infiniteQ.hasNextPage ? (
+                  <Button variant="outline" disabled={infiniteQ.isFetchingNextPage} onClick={() => infiniteQ.fetchNextPage()}>
+                    {infiniteQ.isFetchingNextPage ? "Loading…" : "Load more"}
+                  </Button>
+                ) : loaded > 0 ? (
+                  <div className="text-xs text-muted-foreground">End of results</div>
+                ) : null}
+              </div>
+            </div>
           </Card>
-          <div className="flex justify-center py-4">
-            {infiniteQ.hasNextPage ? (
-              <Button variant="outline" disabled={infiniteQ.isFetchingNextPage} onClick={() => infiniteQ.fetchNextPage()}>
-                {infiniteQ.isFetchingNextPage ? "Loading…" : "Load more"}
-              </Button>
-            ) : loaded > 0 ? (
-              <div className="text-xs text-muted-foreground">End of results</div>
-            ) : null}
-          </div>
-        </>
-      )}
+        )}
+      </div>
     </div>
   );
 }
