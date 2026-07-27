@@ -1,8 +1,64 @@
 "use server";
 
 import { z } from "zod";
+import { SignJWT, importPKCS8 } from "jose";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { requireRole } from "@/lib/auth";
+
+const SHEETS_READONLY_SCOPE = "https://www.googleapis.com/auth/spreadsheets.readonly";
+
+type ServiceAccountKey = { client_email: string; private_key: string; token_uri: string };
+
+// Cached across invocations of the same warm server instance — harmless
+// either way, since a stale/missing cache just falls through to a fresh
+// token request. Google access tokens are valid for ~1hr; refreshed a
+// minute early to avoid racing the expiry.
+let cachedToken: { token: string; expiresAt: number } | null = null;
+
+async function getGoogleAccessToken(): Promise<{ token: string; error?: undefined } | { token?: undefined; error: string }> {
+  if (cachedToken && cachedToken.expiresAt > Date.now() + 60_000) {
+    return { token: cachedToken.token };
+  }
+
+  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+  if (!raw) return { error: "Missing GOOGLE_SERVICE_ACCOUNT_KEY environment variable." };
+
+  let key: ServiceAccountKey;
+  try {
+    key = JSON.parse(raw);
+  } catch {
+    return { error: "GOOGLE_SERVICE_ACCOUNT_KEY is not valid JSON." };
+  }
+  if (!key.client_email || !key.private_key || !key.token_uri) {
+    return { error: "GOOGLE_SERVICE_ACCOUNT_KEY is missing client_email, private_key, or token_uri." };
+  }
+
+  try {
+    const privateKey = await importPKCS8(key.private_key, "RS256");
+    const now = Math.floor(Date.now() / 1000);
+    const assertion = await new SignJWT({ scope: SHEETS_READONLY_SCOPE })
+      .setProtectedHeader({ alg: "RS256" })
+      .setIssuer(key.client_email)
+      .setAudience(key.token_uri)
+      .setIssuedAt(now)
+      .setExpirationTime(now + 3600)
+      .sign(privateKey);
+
+    const res = await fetch(key.token_uri, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion }),
+    });
+    const body: { access_token?: string; expires_in?: number; error?: string; error_description?: string } = await res.json();
+    if (!res.ok || !body.access_token) {
+      return { error: `Google auth failed: ${body.error_description || body.error || res.statusText}` };
+    }
+    cachedToken = { token: body.access_token, expiresAt: Date.now() + (body.expires_in ?? 3600) * 1000 };
+    return { token: body.access_token };
+  } catch (err) {
+    return { error: `Failed to authenticate with the Google service account: ${(err as Error).message}` };
+  }
+}
 
 // Fuzzy column-header matching: a header "matches" a CRM field if it
 // (case-insensitively) contains any of these keywords.
@@ -54,9 +110,6 @@ export async function syncOneSource(input: { source_name: string; form_url: stri
   const data = z.object({ source_name: z.string().min(1), form_url: z.string().min(1) }).parse(input);
   await requireRole(["admin", "kam", "lma"]);
 
-  const sheetsApiKey = process.env.GOOGLE_SHEETS_API_KEY;
-  if (!sheetsApiKey) return { ok: false, error: "Missing GOOGLE_SHEETS_API_KEY environment variable." };
-
   const supabaseUrl = process.env.SUPABASE_URL;
   const anonKey = process.env.SUPABASE_ANON_KEY;
   if (!supabaseUrl || !anonKey) return { ok: false, error: "Missing SUPABASE_URL / SUPABASE_ANON_KEY environment variables." };
@@ -64,14 +117,21 @@ export async function syncOneSource(input: { source_name: string; form_url: stri
   const spreadsheetId = extractSpreadsheetId(data.form_url);
   if (!spreadsheetId) return { ok: false, error: "Couldn't find a spreadsheet ID in this source's Form Link." };
 
+  const auth = await getGoogleAccessToken();
+  if (auth.error) return { ok: false, error: auth.error };
+
   let values: string[][];
   try {
     const res = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Form%20Responses%201?key=${sheetsApiKey}`,
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Form%20Responses%201`,
+      { headers: { Authorization: `Bearer ${auth.token}` } },
     );
     if (!res.ok) {
       const body = await res.text();
-      return { ok: false, error: `Couldn't read the sheet (HTTP ${res.status}): ${body.slice(0, 200)}` };
+      const hint = res.status === 403 || res.status === 404
+        ? " — make sure the sheet is shared with the service account's email (Viewer access)."
+        : "";
+      return { ok: false, error: `Couldn't read the sheet (HTTP ${res.status}): ${body.slice(0, 200)}${hint}` };
     }
     const json: { values?: string[][] } = await res.json();
     values = json.values ?? [];
