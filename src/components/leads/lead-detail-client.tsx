@@ -51,11 +51,7 @@ export function LeadDetailClient({ id, userEmail }: { id: string; userEmail: str
   const leadQ = useQuery({ queryKey: ["lead", id], queryFn: () => getLead({ id }) });
 
   function goBack() {
-    if (typeof window !== "undefined" && window.history.length > 1) {
-      router.back();
-    } else {
-      router.push("/dashboard");
-    }
+    router.back();
   }
 
   function refresh() {

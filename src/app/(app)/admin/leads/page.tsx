@@ -26,6 +26,13 @@ const ATTEMPT_CHIP_LABELS: Record<string, string> = {
   not_interested: "Not Interested",
 };
 
+function formatLeadDate(dateStr: string | null): string {
+  if (!dateStr) return "—";
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return dateStr;
+  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+}
+
 function attemptChipClass(outcome: string): string {
   if (outcome === "connected") return "bg-success/10 text-success";
   if (outcome === "rnr" || outcome === "reconnect") return "bg-amber-100 text-amber-800";
@@ -134,6 +141,21 @@ function AllLeadsPageInner() {
   const [sort, setSort] = React.useState<SortKey>("lead_date");
   const [dateDir, setDateDir] = React.useState<DateDir>("desc");
 
+  // The filters/title block above the table is sticky; the table's own
+  // header sticks right below it. Its height is measured (it can wrap
+  // across screen sizes) so the table header knows how far down to stick.
+  const topBarRef = React.useRef<HTMLDivElement>(null);
+  const [topBarHeight, setTopBarHeight] = React.useState(0);
+  React.useLayoutEffect(() => {
+    const el = topBarRef.current;
+    if (!el) return;
+    const update = () => setTopBarHeight(el.offsetHeight);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   function handleDateClick() {
     setDateDir((d) => (sort === "lead_date" ? (d === "asc" ? "desc" : "asc") : "desc"));
     setSort("lead_date");
@@ -191,7 +213,10 @@ function AllLeadsPageInner() {
   function DateSortTh() {
     const active = sort === "lead_date";
     return (
-      <TableHead className={`cursor-pointer select-none ${active ? "text-foreground" : ""}`} onClick={handleDateClick}>
+      <TableHead
+        className={`w-28 cursor-pointer select-none whitespace-nowrap ${active ? "text-foreground" : ""}`}
+        onClick={handleDateClick}
+      >
         Lead Date{active ? (dateDir === "asc" ? " ↑" : " ↓") : ""}
       </TableHead>
     );
@@ -199,6 +224,7 @@ function AllLeadsPageInner() {
 
   return (
     <div>
+      <div ref={topBarRef} className="sticky top-0 z-20 bg-background pb-1">
       <PageHeader title="All Leads" description="Every lead, every stage — sortable, filterable, exportable." />
       <Card className="mb-4">
         <CardContent className="grid grid-cols-2 gap-3 p-4 md:grid-cols-4 lg:grid-cols-7">
@@ -265,6 +291,7 @@ function AllLeadsPageInner() {
         </div>
         <Button size="sm" variant="outline" onClick={downloadCsv}>Export CSV</Button>
       </div>
+      </div>
 
       {infiniteQ.isLoading ? (
         <Skeleton className="h-64 w-full" />
@@ -275,7 +302,7 @@ function AllLeadsPageInner() {
           <Card>
             <CardContent className="overflow-x-auto p-0">
               <Table>
-                <TableHeader>
+                <TableHeader className="sticky z-10 bg-card" style={{ top: topBarHeight }}>
                   <TableRow>
                     <TableHead>Lead ID</TableHead>
                     <TableHead>Name</TableHead>
@@ -297,7 +324,7 @@ function AllLeadsPageInner() {
                         <TableCell className="font-mono text-[11px]">{r.lead_id}</TableCell>
                         <TableCell>{r.name}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">{r.contact}</TableCell>
-                        <TableCell className="text-muted-foreground">{r.lead_date ?? "—"}</TableCell>
+                        <TableCell className="w-28 whitespace-nowrap text-muted-foreground">{formatLeadDate(r.lead_date)}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">{r.caller || "—"}</TableCell>
                         <TableCell>
                           <CallingAttemptsCell attempts={r.attempts} />
