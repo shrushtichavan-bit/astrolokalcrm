@@ -31,8 +31,8 @@ export default function TeamPage() {
     setEditing({ id: null, name: "", email: "", role: "kam", password: "" });
     setOpen(true);
   }
-  function openEdit(u: { id: string; name: string; email: string; role: string }) {
-    setEditing({ id: u.id, name: u.name, email: u.email, role: u.role, password: "" });
+  function openEdit(u: { id: string; name: string; email: string; role: string; password: string | null }) {
+    setEditing({ id: u.id, name: u.name, email: u.email, role: u.role, password: u.password ?? "" });
     setOpen(true);
   }
 
@@ -99,8 +99,8 @@ export default function TeamPage() {
                     </Select>
                   </div>
                   <div>
-                    <Label>{editing.id ? "New Password (leave blank to keep current)" : "Password"}</Label>
-                    <Input type="password" value={editing.password} onChange={(e) => setEditing({ ...editing, password: e.target.value })} />
+                    <Label>Password</Label>
+                    <Input type="text" value={editing.password} onChange={(e) => setEditing({ ...editing, password: e.target.value })} />
                   </div>
                 </div>
               )}

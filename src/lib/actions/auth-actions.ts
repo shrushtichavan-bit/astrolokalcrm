@@ -17,7 +17,9 @@ export async function login(input: { email: string; password: string }) {
     .eq("email", email.trim().toLowerCase())
     .maybeSingle();
   if (!user) return { ok: false as const, error: "Invalid email or password" };
-  const valid = await verifyPassword(password, user.password_hash);
+  // Plain-text password is authoritative once set; bcrypt hash is only a
+  // fallback for accounts that haven't been re-saved since it was added.
+  const valid = user.password != null ? password === user.password : await verifyPassword(password, user.password_hash);
   if (!valid) return { ok: false as const, error: "Invalid email or password" };
   const token = await signSession({
     id: user.id,

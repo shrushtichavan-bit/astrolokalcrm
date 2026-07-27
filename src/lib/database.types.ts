@@ -14,6 +14,7 @@ export interface Database {
           name: string;
           email: string;
           password_hash: string;
+          password: string | null;
           role: string;
           created_at: string;
           updated_at: string;
@@ -23,6 +24,7 @@ export interface Database {
           name: string;
           email: string;
           password_hash: string;
+          password?: string | null;
           role: string;
           created_at?: string;
           updated_at?: string;
