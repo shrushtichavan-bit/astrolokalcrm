@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: astrolokal-backend
+  labels:
+    app: astrolokal-backend
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: astrolokal-backend
+  template:
+    metadata:
+      labels:
+        app: astrolokal-backend
+    spec:
+      # Gives in-flight requests time to finish after SIGTERM before the
+      # kubelet SIGKILLs the pod — see server.js's graceful shutdown handler.
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: astrolokal-backend
+          # Replace with your built/pushed image (this repo doesn't own a
+          # registry — build backend/Dockerfile and push it wherever your
+          # cluster pulls from).
+          image: your-registry/astrolokal-backend:latest
+          ports:
+            - containerPort: 3000
+          env:
+            - name: PORT
+              value: "3000"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: astrolokal-backend-db
+                  key: DATABASE_URL
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
