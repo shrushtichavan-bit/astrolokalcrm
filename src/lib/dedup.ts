@@ -1,5 +1,5 @@
 import "server-only";
-import { supabaseAdmin } from "@/lib/supabase-admin";
+import { pool } from "@/lib/db";
 import { TERMINAL_STAGES } from "@/lib/helpers";
 
 /** Normalize a raw contact string to a bare 10-digit number (or "" if it can't be). */
@@ -20,8 +20,10 @@ export type SmartDedupResult = {
 };
 
 export async function getCooldownDays(): Promise<number> {
-  const { data } = await supabaseAdmin.from("crm_settings").select("cooldown_days").eq("id", 1).maybeSingle();
-  return data?.cooldown_days ?? 60;
+  const { rows } = await pool.query<{ cooldown_days: number }>(
+    `SELECT cooldown_days FROM crm_settings WHERE id = 1`,
+  );
+  return rows[0]?.cooldown_days ?? 60;
 }
 
 const TERMINAL_STAGE_SET = new Set<string>(TERMINAL_STAGES);
@@ -37,8 +39,15 @@ export async function findDuplicateLead(contact: string): Promise<SmartDedupResu
   const target = normalizeContact(contact);
   if (!target) return { match: null, blocking: false, reason: null };
 
-  const { data } = await supabaseAdmin.from("leads").select("id, lead_id, name, contact, current_stage, closed_at");
-  const found = (data ?? []).find((l) => normalizeContact(l.contact) === target);
+  const { rows } = await pool.query<{
+    id: string;
+    lead_id: string;
+    name: string;
+    contact: string;
+    current_stage: string;
+    closed_at: string | null;
+  }>(`SELECT id, lead_id, name, contact, current_stage, closed_at FROM leads`);
+  const found = rows.find((l) => normalizeContact(l.contact) === target);
   if (!found) return { match: null, blocking: false, reason: null };
 
   const match: DuplicateMatch = {
@@ -72,18 +81,18 @@ export async function logDuplicate(entry: {
   /** Full submission payload, stored so an admin can later force-allow it from /admin/duplicates. */
   payload?: unknown;
 }) {
-  const { data, error } = await supabaseAdmin
-    .from("duplicate_log")
-    .insert({
-      incoming_name: entry.incoming_name ?? null,
-      incoming_contact: entry.incoming_contact,
-      incoming_source: entry.incoming_source ?? null,
-      matched_lead_id: entry.matched_lead_id,
-      detected_by: entry.detected_by,
-      payload: (entry.payload ?? null) as never,
-    })
-    .select("id")
-    .single();
-  if (error) throw new Error(error.message);
-  return data.id as string;
+  const { rows } = await pool.query<{ id: string }>(
+    `INSERT INTO duplicate_log (incoming_name, incoming_contact, incoming_source, matched_lead_id, detected_by, payload)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING id`,
+    [
+      entry.incoming_name ?? null,
+      entry.incoming_contact,
+      entry.incoming_source ?? null,
+      entry.matched_lead_id,
+      entry.detected_by,
+      entry.payload != null ? JSON.stringify(entry.payload) : null,
+    ],
+  );
+  return rows[0].id;
 }

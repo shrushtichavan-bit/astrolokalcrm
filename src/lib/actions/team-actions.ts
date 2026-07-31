@@ -1,16 +1,18 @@
 "use server";
 
 import { z } from "zod";
-import { supabaseAdmin } from "@/lib/supabase-admin";
+import { pool } from "@/lib/db";
 import { hashPassword, requireRole } from "@/lib/auth";
+import type { UserRow } from "@/lib/db-types";
 
 const VALID_ROLES = ["admin", "kam", "lma", "telecaller"] as const;
 
 export async function listUsers() {
   await requireRole("admin");
-  const { data, error } = await supabaseAdmin.from("users").select("id, name, email, role, password, created_at").order("name");
-  if (error) throw error;
-  return { users: data ?? [] };
+  const { rows } = await pool.query<Pick<UserRow, "id" | "name" | "email" | "role" | "password" | "created_at">>(
+    `SELECT id, name, email, role, password, created_at FROM users ORDER BY name`,
+  );
+  return { users: rows };
 }
 
 export async function addUser(input: { name: string; email: string; password: string; role: string }) {
@@ -24,13 +26,16 @@ export async function addUser(input: { name: string; email: string; password: st
     .parse(input);
   await requireRole("admin");
   const email = data.email.trim().toLowerCase();
-  const { data: existing } = await supabaseAdmin.from("users").select("id").eq("email", email).maybeSingle();
-  if (existing) throw new Error(`A team member with email ${email} already exists`);
+  const { rows: existingRows } = await pool.query<{ id: string }>(`SELECT id FROM users WHERE email = $1`, [email]);
+  if (existingRows[0]) throw new Error(`A team member with email ${email} already exists`);
   const password_hash = await hashPassword(data.password);
-  const { error } = await supabaseAdmin
-    .from("users")
-    .insert({ name: data.name.trim(), email, password_hash, password: data.password, role: data.role });
-  if (error) throw new Error(error.message);
+  await pool.query(`INSERT INTO users (name, email, password_hash, password, role) VALUES ($1, $2, $3, $4, $5)`, [
+    data.name.trim(),
+    email,
+    password_hash,
+    data.password,
+    data.role,
+  ]);
   return { ok: true };
 }
 
@@ -45,24 +50,31 @@ export async function updateUser(input: { id: string; name: string; email: strin
     })
     .parse(input);
   await requireRole("admin");
-  const update: { name: string; email: string; role: string; password_hash?: string; password?: string } = {
-    name: data.name.trim(),
-    email: data.email.trim().toLowerCase(),
-    role: data.role,
-  };
+  const email = data.email.trim().toLowerCase();
   if (data.password) {
-    update.password_hash = await hashPassword(data.password);
-    update.password = data.password;
+    const password_hash = await hashPassword(data.password);
+    await pool.query(`UPDATE users SET name = $1, email = $2, role = $3, password_hash = $4, password = $5 WHERE id = $6`, [
+      data.name.trim(),
+      email,
+      data.role,
+      password_hash,
+      data.password,
+      data.id,
+    ]);
+  } else {
+    await pool.query(`UPDATE users SET name = $1, email = $2, role = $3 WHERE id = $4`, [
+      data.name.trim(),
+      email,
+      data.role,
+      data.id,
+    ]);
   }
-  const { error } = await supabaseAdmin.from("users").update(update).eq("id", data.id);
-  if (error) throw new Error(error.message);
   return { ok: true };
 }
 
 export async function deleteUser(input: { id: string }) {
   const { id } = z.object({ id: z.string().uuid() }).parse(input);
   await requireRole("admin");
-  const { error } = await supabaseAdmin.from("users").delete().eq("id", id);
-  if (error) throw new Error(error.message);
+  await pool.query(`DELETE FROM users WHERE id = $1`, [id]);
   return { ok: true };
 }

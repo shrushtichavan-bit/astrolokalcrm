@@ -1,30 +1,24 @@
 "use server";
 
 import { z } from "zod";
-import { supabaseAdmin } from "@/lib/supabase-admin";
+import { pool } from "@/lib/db";
 import { requireRole, requireUser } from "@/lib/auth";
+import type { SourcePriorityConfigRow } from "@/lib/db-types";
 
 export async function getSourcePriorityConfig() {
   await requireRole("admin");
-  const { data, error } = await supabaseAdmin
-    .from("source_priority_config")
-    .select("*")
-    .order("priority_score", { ascending: true })
-    .order("source_name", { ascending: true });
-  if (error) throw error;
-  return { sources: data ?? [] };
+  const { rows } = await pool.query<SourcePriorityConfigRow>(
+    `SELECT * FROM source_priority_config ORDER BY priority_score ASC, source_name ASC`,
+  );
+  return { sources: rows };
 }
 
 export async function listActiveSources() {
   await requireUser();
-  const { data, error } = await supabaseAdmin
-    .from("source_priority_config")
-    .select("source_name, priority_score, form_url")
-    .eq("is_active", true)
-    .order("priority_score", { ascending: true })
-    .order("source_name", { ascending: true });
-  if (error) throw error;
-  return { sources: data ?? [] };
+  const { rows } = await pool.query<Pick<SourcePriorityConfigRow, "source_name" | "priority_score" | "form_url">>(
+    `SELECT source_name, priority_score, form_url FROM source_priority_config WHERE is_active = true ORDER BY priority_score ASC, source_name ASC`,
+  );
+  return { sources: rows };
 }
 
 export async function upsertSourcePriority(input: {
@@ -42,24 +36,19 @@ export async function upsertSourcePriority(input: {
     })
     .parse(input);
   await requireRole("admin");
-  const { error } = await supabaseAdmin.from("source_priority_config").upsert(
-    {
-      source_name: data.source_name.trim(),
-      priority_score: data.priority_score,
-      is_active: data.is_active,
-      form_url: data.form_url || null,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "source_name" },
+  await pool.query(
+    `INSERT INTO source_priority_config (source_name, priority_score, is_active, form_url, updated_at)
+     VALUES ($1, $2, $3, $4, now())
+     ON CONFLICT (source_name) DO UPDATE SET
+       priority_score = EXCLUDED.priority_score, is_active = EXCLUDED.is_active, form_url = EXCLUDED.form_url, updated_at = EXCLUDED.updated_at`,
+    [data.source_name.trim(), data.priority_score, data.is_active, data.form_url || null],
   );
-  if (error) throw new Error(error.message);
   return { ok: true };
 }
 
 export async function deleteSourcePriority(input: { source_name: string }) {
   const { source_name } = z.object({ source_name: z.string().min(1).max(200) }).parse(input);
   await requireRole("admin");
-  const { error } = await supabaseAdmin.from("source_priority_config").delete().eq("source_name", source_name);
-  if (error) throw new Error(error.message);
+  await pool.query(`DELETE FROM source_priority_config WHERE source_name = $1`, [source_name]);
   return { ok: true };
 }

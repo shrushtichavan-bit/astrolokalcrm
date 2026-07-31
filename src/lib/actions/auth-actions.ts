@@ -1,8 +1,9 @@
 "use server";
 
 import { z } from "zod";
-import { supabaseAdmin } from "@/lib/supabase-admin";
+import { pool } from "@/lib/db";
 import { verifyPassword, signSession, setSessionCookie, clearSessionCookie, type Role } from "@/lib/auth";
+import type { UserRow } from "@/lib/db-types";
 
 const LoginSchema = z.object({
   email: z.string().email(),
@@ -11,11 +12,8 @@ const LoginSchema = z.object({
 
 export async function login(input: { email: string; password: string }) {
   const { email, password } = LoginSchema.parse(input);
-  const { data: user } = await supabaseAdmin
-    .from("users")
-    .select("*")
-    .eq("email", email.trim().toLowerCase())
-    .maybeSingle();
+  const { rows } = await pool.query<UserRow>(`SELECT * FROM users WHERE email = $1`, [email.trim().toLowerCase()]);
+  const user = rows[0];
   if (!user) return { ok: false as const, error: "Invalid email or password" };
   // Plain-text password is authoritative once set; bcrypt hash is only a
   // fallback for accounts that haven't been re-saved since it was added.

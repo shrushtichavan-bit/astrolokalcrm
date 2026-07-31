@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { SignJWT, importPKCS8 } from "jose";
-import { supabaseAdmin } from "@/lib/supabase-admin";
+import { pool } from "@/lib/db";
 import { requireRole } from "@/lib/auth";
 
 const SHEETS_READONLY_SCOPE = "https://www.googleapis.com/auth/spreadsheets.readonly";
@@ -86,16 +86,13 @@ function extractSpreadsheetId(formUrl: string): string | null {
 
 export async function getSyncableSources() {
   await requireRole(["admin", "kam", "lma"]);
-  const { data, error } = await supabaseAdmin
-    .from("source_priority_config")
-    .select("source_name, form_url")
-    .eq("is_active", true)
-    .not("form_url", "is", null)
-    .order("priority_score", { ascending: true })
-    .order("source_name", { ascending: true });
-  if (error) throw new Error(error.message);
+  const { rows } = await pool.query<{ source_name: string; form_url: string | null }>(
+    `SELECT source_name, form_url FROM source_priority_config
+     WHERE is_active = true AND form_url IS NOT NULL
+     ORDER BY priority_score ASC, source_name ASC`,
+  );
   return {
-    sources: (data ?? [])
+    sources: rows
       .filter((s): s is { source_name: string; form_url: string } => Boolean(s.form_url))
       .map((s) => ({ source_name: s.source_name, form_url: s.form_url })),
   };
