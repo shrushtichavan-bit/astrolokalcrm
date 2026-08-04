@@ -4,6 +4,7 @@ import { z } from "zod";
 import { SignJWT, importPKCS8 } from "jose";
 import { pool } from "@/lib/db";
 import { requireRole } from "@/lib/auth";
+import { intakeLead } from "@/lib/intake";
 
 const SHEETS_READONLY_SCOPE = "https://www.googleapis.com/auth/spreadsheets.readonly";
 
@@ -107,10 +108,6 @@ export async function syncOneSource(input: { source_name: string; form_url: stri
   const data = z.object({ source_name: z.string().min(1), form_url: z.string().min(1) }).parse(input);
   await requireRole(["admin", "kam", "lma"]);
 
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const anonKey = process.env.SUPABASE_ANON_KEY;
-  if (!supabaseUrl || !anonKey) return { ok: false, error: "Missing SUPABASE_URL / SUPABASE_ANON_KEY environment variables." };
-
   const spreadsheetId = extractSpreadsheetId(data.form_url);
   if (!spreadsheetId) return { ok: false, error: "Couldn't find a spreadsheet ID in this source's Form Link." };
 
@@ -152,40 +149,32 @@ export async function syncOneSource(input: { source_name: string; form_url: stri
   }
 
   let added = 0;
-  let updated = 0;
   let skipped = 0;
 
   for (const row of values.slice(1)) {
     const contact = (row[contactIdx] ?? "").toString().trim();
     if (!contact) continue; // missing/blank contact — not a real row, don't count it either way
 
-    const payload = {
-      name: (nameIdx != null ? row[nameIdx] : "")?.toString().trim() || "",
-      contact,
-      email: emailIdx != null ? row[emailIdx]?.toString().trim() || null : null,
-      city: cityIdx != null ? row[cityIdx]?.toString().trim() || null : null,
-      language: languageIdx != null ? row[languageIdx]?.toString().trim() || null : null,
-      source: data.source_name,
-      allow_upsert: true,
-    };
-
     try {
-      const res = await fetch(`${supabaseUrl}/functions/v1/intake-lead`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${anonKey}` },
-        body: JSON.stringify(payload),
+      // Same in-process pipeline as /api/intake-lead — no HTTP hop, no
+      // Supabase Edge Function. Blocked duplicates and invalid rows both
+      // count as skipped; "updated" no longer exists under the dedup rule
+      // (an existing lead either blocks the row or is past cooldown, in
+      // which case a fresh lead is created).
+      const result = await intakeLead({
+        name: (nameIdx != null ? row[nameIdx] : "")?.toString().trim() || "",
+        contact,
+        email: emailIdx != null ? row[emailIdx]?.toString().trim() || null : null,
+        city: cityIdx != null ? row[cityIdx]?.toString().trim() || null : null,
+        language: languageIdx != null ? row[languageIdx]?.toString().trim() || null : null,
+        source: data.source_name,
       });
-      const body: { status?: string } = await res.json().catch(() => ({}));
-      if (res.status === 200 || res.status === 201) {
-        if (body.status === "updated") updated++;
-        else added++;
-      } else {
-        skipped++;
-      }
+      if (result.kind === "created") added++;
+      else skipped++;
     } catch {
       skipped++;
     }
   }
 
-  return { ok: true, added, updated, skipped };
+  return { ok: true, added, updated: 0, skipped };
 }

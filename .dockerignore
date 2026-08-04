@@ -5,4 +5,7 @@ node_modules
 !.env.example
 astrolokalcrm-backup
 backend
+# migrations are copied into the runtime image (see Dockerfile) — the rest
+# of backend/ stays out of the build context
+!backend/migrations
 .git

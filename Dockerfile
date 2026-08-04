@@ -27,7 +27,18 @@ COPY --from=builder /app/public ./public
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 
+# Schema migrations run in THIS container now (single-app deployment — no
+# separate backend service). backend/migrations stays the source of truth
+# for the SQL; migrate.mjs uses the `pg` package already present in the
+# standalone node_modules.
+COPY --chown=node:node migrate.mjs ./migrate.mjs
+COPY --chown=node:node backend/migrations ./migrations
+
 USER node
 
 EXPOSE 3000
-CMD ["node", "server.js"]
+
+# Migrations always run before the server starts; if migrate.mjs exits
+# non-zero, `&&` short-circuits and the server never starts, so the
+# container fails fast instead of serving against a broken schema.
+CMD ["sh", "-c", "node migrate.mjs && node server.js"]
