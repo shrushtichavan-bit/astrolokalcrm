@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ListChecks, ChevronDown } from "lucide-react";
+import { ListChecks, ChevronDown, Search } from "lucide-react";
 import {
   getUnassignedTelecallerLeads,
   getUnassignedLeadIds,
@@ -12,7 +12,7 @@ import {
   assignTelecallerBulk,
 } from "@/lib/actions/assignments-actions";
 import { listActiveSources } from "@/lib/actions/sources-actions";
-import { listAllPeople } from "@/lib/actions/admin-actions";
+import { getPool } from "@/lib/actions/leads-actions";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { PriorityBadge } from "@/components/priority-badge";
@@ -81,6 +81,7 @@ type Filters = {
   from: string | null;
   to: string | null;
   dateDir: "asc" | "desc";
+  search: string | null;
 };
 
 function useAllotmentFilters() {
@@ -90,6 +91,12 @@ function useAllotmentFilters() {
   const [from, setFrom] = React.useState("");
   const [to, setTo] = React.useState("");
   const [dateDir, setDateDir] = React.useState<"asc" | "desc">("asc");
+  const [search, setSearch] = React.useState("");
+  const [debouncedSearch, setDebouncedSearch] = React.useState("");
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 250);
+    return () => clearTimeout(t);
+  }, [search]);
 
   const filters: Filters = React.useMemo(
     () => ({
@@ -99,8 +106,9 @@ function useAllotmentFilters() {
       from: from || null,
       to: to || null,
       dateDir,
+      search: debouncedSearch || null,
     }),
-    [sources, languages, priority, from, to, dateDir],
+    [sources, languages, priority, from, to, dateDir, debouncedSearch],
   );
 
   const hasActive = sources.length > 0 || languages.length > 0 || Boolean(priority) || Boolean(from) || Boolean(to);
@@ -119,9 +127,23 @@ function useAllotmentFilters() {
 
   return {
     sources, setSources, languages, setLanguages, priority, setPriority, from, setFrom, to, setTo,
-    dateDir, toggleDateSort,
+    dateDir, toggleDateSort, search, setSearch,
     filters, hasActive, clearAll,
   };
+}
+
+function AllotmentSearchBar({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="relative">
+      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Search by name or contact number…"
+        className="pl-9"
+      />
+    </div>
+  );
 }
 
 function AllotmentFiltersBar({
@@ -245,8 +267,9 @@ function UnassignedTab() {
   }, [filtersKey]);
 
   const sourcesQ = useQuery({ queryKey: ["active-sources"], queryFn: () => listActiveSources() });
-  const peopleQ = useQuery({ queryKey: ["admin-people"], queryFn: () => listAllPeople(), staleTime: 5 * 60_000 });
-  const telecallers = React.useMemo(() => (peopleQ.data?.people ?? []).filter((p) => p.role === "telecaller"), [peopleQ.data]);
+  const callingPoolQ = useQuery({ queryKey: ["pool", "calling"], queryFn: () => getPool({ stage: "calling" }), staleTime: 5 * 60_000 });
+  const telecallers = callingPoolQ.data?.members ?? [];
+  const telecallerNames = callingPoolQ.data?.names ?? {};
 
   const q = useQuery({
     queryKey: ["admin-unassigned-leads", filterState.filters, page],
@@ -314,6 +337,7 @@ function UnassignedTab() {
 
   return (
     <div className="mt-4 space-y-4 pb-24">
+      <AllotmentSearchBar value={filterState.search} onChange={filterState.setSearch} />
       <AllotmentFiltersBar state={filterState} sourceOptions={sourceOptions} />
 
       {allPageSelected && <SelectAllBanner selectedCount={selected.size} total={total} expanding={expanding} onSelectAll={selectAllMatching} />}
@@ -369,7 +393,7 @@ function UnassignedTab() {
             <Select value={assignTo} onValueChange={setAssignTo}>
               <SelectTrigger className="w-64"><SelectValue placeholder="Select telecaller" /></SelectTrigger>
               <SelectContent>
-                {telecallers.map((t) => <SelectItem key={t.email} value={t.email}>{t.name}</SelectItem>)}
+                {telecallers.map((email) => <SelectItem key={email} value={email}>{telecallerNames[email] ?? email}</SelectItem>)}
               </SelectContent>
             </Select>
             <Button onClick={assign} disabled={busy}>{busy ? "Assigning…" : "Assign"}</Button>
@@ -407,8 +431,9 @@ function AssignedTab() {
   }, [filtersKey]);
 
   const sourcesQ = useQuery({ queryKey: ["active-sources"], queryFn: () => listActiveSources() });
-  const peopleQ = useQuery({ queryKey: ["admin-people"], queryFn: () => listAllPeople(), staleTime: 5 * 60_000 });
-  const telecallers = React.useMemo(() => (peopleQ.data?.people ?? []).filter((p) => p.role === "telecaller"), [peopleQ.data]);
+  const callingPoolQ = useQuery({ queryKey: ["pool", "calling"], queryFn: () => getPool({ stage: "calling" }), staleTime: 5 * 60_000 });
+  const telecallers = callingPoolQ.data?.members ?? [];
+  const telecallerNames = callingPoolQ.data?.names ?? {};
 
   const q = useQuery({
     queryKey: ["admin-assigned-leads", filterState.filters, page],
@@ -503,6 +528,7 @@ function AssignedTab() {
 
   return (
     <div className="mt-4 space-y-4 pb-24">
+      <AllotmentSearchBar value={filterState.search} onChange={filterState.setSearch} />
       <AllotmentFiltersBar state={filterState} sourceOptions={sourceOptions} />
 
       {allPageSelected && <SelectAllBanner selectedCount={selected.size} total={total} expanding={expanding} onSelectAll={selectAllMatching} />}
@@ -550,7 +576,7 @@ function AssignedTab() {
                             <Select value={reassignTo} onValueChange={setReassignTo}>
                               <SelectTrigger className="h-8 w-44"><SelectValue placeholder="Telecaller" /></SelectTrigger>
                               <SelectContent>
-                                {telecallers.map((t) => <SelectItem key={t.email} value={t.email}>{t.name}</SelectItem>)}
+                                {telecallers.map((email) => <SelectItem key={email} value={email}>{telecallerNames[email] ?? email}</SelectItem>)}
                               </SelectContent>
                             </Select>
                             <Button size="sm" disabled={rowBusy} onClick={() => confirmReassign(l.id)}>Confirm</Button>
@@ -577,7 +603,7 @@ function AssignedTab() {
             <Select value={assignTo} onValueChange={setAssignTo}>
               <SelectTrigger className="w-64"><SelectValue placeholder="Select telecaller" /></SelectTrigger>
               <SelectContent>
-                {telecallers.map((t) => <SelectItem key={t.email} value={t.email}>{t.name}</SelectItem>)}
+                {telecallers.map((email) => <SelectItem key={email} value={email}>{telecallerNames[email] ?? email}</SelectItem>)}
               </SelectContent>
             </Select>
             <Button onClick={bulkReassign} disabled={busy}>{busy ? "Reassigning…" : "Reassign"}</Button>

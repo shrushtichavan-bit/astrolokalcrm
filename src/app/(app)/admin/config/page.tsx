@@ -14,6 +14,7 @@ import {
   upsertCrmSettings,
 } from "@/lib/actions/config-actions";
 import { listUsers } from "@/lib/actions/team-actions";
+import { roleLabel } from "@/lib/roles";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -34,6 +35,21 @@ const STAGE_LABELS: Record<string, string> = {
   round_4: "Round 4",
   expert_creation: "Expert Creation",
 };
+
+const ROLE_BADGE_CLASSES: Record<string, string> = {
+  admin: "bg-primary/10 text-primary",
+  kam: "bg-blue-100 text-blue-700",
+  lma: "bg-purple-100 text-purple-700",
+  telecaller: "bg-green-100 text-green-700",
+};
+
+function RoleBadge({ role }: { role: string }) {
+  return (
+    <span className={`inline-flex items-center whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-semibold ${ROLE_BADGE_CLASSES[role] ?? "bg-muted text-muted-foreground"}`}>
+      {roleLabel(role)}
+    </span>
+  );
+}
 
 export default function ConfigPage() {
   return (
@@ -219,6 +235,13 @@ function StagePoolsTab() {
 
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [busy, setBusy] = React.useState(false);
+  const [search, setSearch] = React.useState("");
+
+  const allUsers = usersQ.data?.users ?? [];
+  const term = search.trim().toLowerCase();
+  const filteredUsers = term
+    ? allUsers.filter((u) => u.name.toLowerCase().includes(term) || u.email.toLowerCase().includes(term) || u.role.toLowerCase().includes(term))
+    : allUsers;
 
   React.useEffect(() => {
     const emails = (poolsQ.data?.pools ?? []).filter((p) => p.stage === stage).map((p) => p.eligible_email);
@@ -256,26 +279,41 @@ function StagePoolsTab() {
   return (
     <Card className="mt-4">
       <CardContent className="space-y-4 p-4">
-        <div className="w-56">
-          <Label className="text-xs">Stage</Label>
-          <Select value={stage} onValueChange={setStage}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>{STAGES.map((s) => <SelectItem key={s} value={s}>{STAGE_LABELS[s]}</SelectItem>)}</SelectContent>
-          </Select>
+        <div className="flex items-center gap-3">
+          <div className="w-56">
+            <Label className="text-xs">Stage</Label>
+            <Select value={stage} onValueChange={setStage}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>{STAGES.map((s) => <SelectItem key={s} value={s}>{STAGE_LABELS[s]}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div className="flex-1">
+            <Label className="text-xs">&nbsp;</Label>
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by name or email"
+              className="h-10 w-full"
+            />
+          </div>
         </div>
         {usersQ.isLoading ? (
           <Skeleton className="h-40 w-full" />
         ) : (
           <div className="space-y-2">
-            {(usersQ.data?.users ?? []).map((u) => (
+            {filteredUsers.map((u) => (
               <label key={u.id} className="flex items-center gap-2 rounded-md border border-border p-2 text-sm">
                 <Checkbox checked={selected.has(u.email)} onCheckedChange={() => toggle(u.email)} />
                 <span className="font-medium">{u.name}</span>
                 <span className="text-muted-foreground">{u.email}</span>
+                <RoleBadge role={u.role} />
               </label>
             ))}
-            {(usersQ.data?.users ?? []).length === 0 && (
+            {allUsers.length === 0 && (
               <p className="text-sm text-muted-foreground">No team members yet — add some in Team first.</p>
+            )}
+            {allUsers.length > 0 && filteredUsers.length === 0 && (
+              <p className="text-sm text-muted-foreground">No users match your search.</p>
             )}
           </div>
         )}
