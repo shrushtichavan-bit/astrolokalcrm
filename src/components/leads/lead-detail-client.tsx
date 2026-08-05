@@ -12,6 +12,7 @@ import {
   startRound,
   submitRound,
   linkExpertProfile,
+  reassignStageOwner,
 } from "@/lib/actions/leads-actions";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { EmptyState } from "@/components/empty-state";
@@ -64,7 +65,7 @@ export function LeadDetailClient({ id, userEmail }: { id: string; userEmail: str
       <div className="space-y-4">
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-32 w-full" />
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_380px]">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[3fr_2fr]">
           <Skeleton className="h-96 w-full" />
           <Skeleton className="h-96 w-full" />
         </div>
@@ -121,9 +122,9 @@ export function LeadDetailClient({ id, userEmail }: { id: string; userEmail: str
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_380px]">
-        <LeadTimeline data={data} />
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[3fr_2fr]">
         <ActionsPanel data={data} userEmail={userEmail} onChanged={refresh} />
+        <LeadTimeline data={data} onChanged={refresh} />
       </div>
     </div>
   );
@@ -143,7 +144,7 @@ type TimelineItem = {
   details?: React.ReactNode;
 };
 
-function LeadTimeline({ data }: { data: LeadData }) {
+function LeadTimeline({ data, onChanged }: { data: LeadData; onChanged: () => void }) {
   const { lead, attempts, rounds, profile, assignments, names } = data;
   const [openId, setOpenId] = React.useState<string | null>(null);
   const numRounds = data.cfg.num_rounds;
@@ -189,6 +190,9 @@ function LeadTimeline({ data }: { data: LeadData }) {
     details: (
       <div className="space-y-2 text-sm text-muted-foreground">
         <div>Assigned to: <span className="font-medium text-foreground">{nameOf(callingAssignedEmail)}</span></div>
+        {callingAssignedEmail && (
+          <ReassignControl leadId={lead.id} stage="calling" currentEmail={callingAssignedEmail} onChanged={onChanged} />
+        )}
         {sortedAttempts.length === 0 && <div>No attempts logged yet.</div>}
         {sortedAttempts.map((a) => {
           const o = (a as { outcome?: string | null }).outcome ?? (a.connected ? "connected" : "rnr");
@@ -244,6 +248,9 @@ function LeadTimeline({ data }: { data: LeadData }) {
             Conducted by:{" "}
             <span className="font-medium text-foreground">{nameOf(round?.conducted_by) ?? nameOf(assignedTo) ?? "Not started yet"}</span>
           </div>
+          {state !== "future" && (round?.conducted_by ?? assignedTo) && (
+            <ReassignControl leadId={lead.id} stage={stageKey} currentEmail={round?.conducted_by ?? assignedTo} onChanged={onChanged} />
+          )}
           {round?.total_score != null && <div>Score: <span className="font-medium text-foreground">{round.total_score}</span></div>}
           {round?.remarks && <div>Notes: {round.remarks}</div>}
         </div>
@@ -290,6 +297,14 @@ function LeadTimeline({ data }: { data: LeadData }) {
           Assigned to:{" "}
           <span className="font-medium text-foreground">{nameOf(profile?.linked_by) ?? nameOf(assignedCreation) ?? "Not started yet"}</span>
         </div>
+        {creationState !== "future" && (profile?.linked_by ?? assignedCreation) && (
+          <ReassignControl
+            leadId={lead.id}
+            stage="expert_creation"
+            currentEmail={profile?.linked_by ?? assignedCreation}
+            onChanged={onChanged}
+          />
+        )}
         {profile && <div>Expert ID: <span className="font-mono text-foreground">{profile.expert_id}</span></div>}
       </div>
     ),
@@ -328,6 +343,78 @@ function LeadTimeline({ data }: { data: LeadData }) {
           </Card>
         );
       })}
+    </div>
+  );
+}
+
+/** Inline "Reassign" link + pool-scoped picker shown below a Timeline stage's assignee — only rendered on the lead detail page. */
+function ReassignControl({
+  leadId,
+  stage,
+  currentEmail,
+  onChanged,
+}: {
+  leadId: string;
+  stage: string;
+  currentEmail: string | null | undefined;
+  onChanged: () => void;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const [value, setValue] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const poolQ = useQuery({ queryKey: ["pool", stage], queryFn: () => getPool({ stage }), staleTime: 5 * 60_000, enabled: open });
+  const pool = poolQ.data?.members ?? [];
+  const names = poolQ.data?.names ?? {};
+
+  async function confirm() {
+    if (!value) return;
+    setBusy(true);
+    try {
+      await reassignStageOwner({ lead_id: leadId, stage, new_email: value });
+      toast.success(`Reassigned to ${names[value] ?? value}.`);
+      setOpen(false);
+      setValue("");
+      onChanged();
+    } catch (e) {
+      toast.error("Something went wrong.", { description: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <button type="button" onClick={() => setOpen(true)} className="text-xs font-medium text-primary hover:underline">
+        Reassign
+      </button>
+    );
+  }
+
+  const options = pool.filter((m) => m !== currentEmail);
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Select value={value} onValueChange={setValue}>
+        <SelectTrigger className="h-8 w-48 text-xs"><SelectValue placeholder={poolQ.isLoading ? "Loading…" : "Select person"} /></SelectTrigger>
+        <SelectContent>
+          {options.map((m) => <SelectItem key={m} value={m}>{names[m] ?? m}</SelectItem>)}
+        </SelectContent>
+      </Select>
+      <Button size="sm" variant="outline" className="h-8" disabled={!value || busy} onClick={confirm}>
+        {busy ? "Saving…" : "Confirm"}
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-8"
+        onClick={() => {
+          setOpen(false);
+          setValue("");
+        }}
+      >
+        Cancel
+      </Button>
+      {!poolQ.isLoading && options.length === 0 && <p className="w-full text-xs text-destructive">No one else is in this stage&apos;s pool.</p>}
     </div>
   );
 }

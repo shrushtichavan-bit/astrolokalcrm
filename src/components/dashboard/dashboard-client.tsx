@@ -5,12 +5,7 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, ListChecks, UserPlus, Settings2, ArrowRight, ChevronDown } from "lucide-react";
 import { getRecentActivity } from "@/lib/actions/admin-actions";
-import {
-  getTelecallerDashboard,
-  getLmaDashboard,
-  getPipelineSnapshot,
-  getAdminDashboardExtras,
-} from "@/lib/actions/dashboard-actions";
+import { getPipelineSnapshot, getAdminDashboardExtras, getPoolDashboard } from "@/lib/actions/dashboard-actions";
 import type { ShellUser } from "@/components/app-shell";
 import { PriorityBadge } from "@/components/priority-badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -24,9 +19,15 @@ type DateFilter = { from: string | null; to: string | null };
 const NO_FILTER: DateFilter = { from: null, to: null };
 
 type PendingDoneStat = { key: string; label: string; pending: number; done: number };
-type LeadRow = { id: string; lead_id: string; name: string; contact: string; source: string | null; lead_date: string | null };
+type LeadRow = { id: string; lead_id: string; name: string; contact: string; source: string | null; lead_date: string | null; priority: number };
 type PendingGroup = { key: string; label: string; leads: LeadRow[] };
-type RoleDashboardData = { pendingTotal: number; stats: PendingDoneStat[]; pendingGroups: PendingGroup[]; doneLeads: LeadRow[] };
+type RoleDashboardData = {
+  pendingTotal: number;
+  stats: PendingDoneStat[];
+  pendingGroups: PendingGroup[];
+  doneLeads: LeadRow[];
+  myStages?: string[];
+};
 
 function formatContact(c: string): string {
   const digits = (c ?? "").replace(/\D/g, "");
@@ -91,6 +92,37 @@ function DateRangeFilter({ onApply }: { onApply: (f: DateFilter) => void }) {
 }
 
 function LeadRowsTable({ leads }: { leads: LeadRow[] }) {
+  const [sortKey, setSortKey] = React.useState<"lead_date" | "priority" | null>(null);
+  const [sortDir, setSortDir] = React.useState<"asc" | "desc">("asc");
+
+  function toggleSort(key: "lead_date" | "priority") {
+    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  }
+
+  const sorted = [...leads].sort((a, b) => {
+    if (!sortKey) return 0;
+    const av = sortKey === "lead_date" ? (a.lead_date ?? "") : a.priority;
+    const bv = sortKey === "lead_date" ? (b.lead_date ?? "") : b.priority;
+    return sortDir === "asc" ? (av > bv ? 1 : -1) : (av < bv ? 1 : -1);
+  });
+
+  function SortableHead({ label, sortKeyValue }: { label: string; sortKeyValue: "lead_date" | "priority" }) {
+    const active = sortKey === sortKeyValue;
+    return (
+      <TableHead
+        onClick={() => toggleSort(sortKeyValue)}
+        className="cursor-pointer select-none hover:text-foreground"
+      >
+        {label}
+        {active ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
+      </TableHead>
+    );
+  }
+
   return (
     <Table>
       <TableHeader>
@@ -98,18 +130,20 @@ function LeadRowsTable({ leads }: { leads: LeadRow[] }) {
           <TableHead>Name</TableHead>
           <TableHead>Contact</TableHead>
           <TableHead>Source</TableHead>
-          <TableHead>Date</TableHead>
+          <SortableHead label="Priority" sortKeyValue="priority" />
+          <SortableHead label="Date" sortKeyValue="lead_date" />
           <TableHead />
         </TableRow>
       </TableHeader>
       <TableBody>
-        {leads.map((l) => (
+        {sorted.map((l) => (
           <TableRow key={l.id}>
             <TableCell className="font-medium text-foreground">{l.name}</TableCell>
             <TableCell className="tabular-nums text-muted-foreground">{formatContact(l.contact)}</TableCell>
             <TableCell>
               <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">{l.source ?? "Direct"}</span>
             </TableCell>
+            <TableCell><PriorityBadge priority={l.priority} /></TableCell>
             <TableCell className="text-muted-foreground">{l.lead_date ?? "—"}</TableCell>
             <TableCell className="text-right">
               <Button asChild size="sm">
@@ -145,9 +179,8 @@ function StatCard({ stat }: { stat: PendingDoneStat }) {
 }
 
 export function DashboardClient({ user }: { user: ShellUser }) {
-  if (user.role === "admin" || user.role === "kam") return <AdminDashboard user={user} />;
-  if (user.role === "lma") return <LmaDashboard user={user} />;
-  return <TelecallerDashboard user={user} />;
+  if (user.role === "admin") return <AdminDashboard user={user} />;
+  return <PoolDashboard user={user} />;
 }
 
 /* ===================== ADMIN / KAM (identical view) ===================== */
@@ -230,8 +263,10 @@ function AdminDashboard({ user }: { user: ShellUser }) {
                         <div className="min-w-0 flex-1">
                           <p className="truncate">
                             <span className="font-medium text-foreground">{r.performed_by}</span>{" "}
-                            <span className="text-muted-foreground">{r.description}</span>
-                            {r.lead && (
+                            <span className="text-muted-foreground">
+                              {r.action.startsWith("Duplicate blocked") ? `🚫 ${r.description}` : r.description}
+                            </span>
+                            {r.lead && !r.action.startsWith("Duplicate blocked") && (
                               <>
                                 {" — "}
                                 <Link href={`/leads/${r.lead.id}`} className="font-medium text-primary hover:underline">{r.lead.name}</Link>
@@ -290,10 +325,13 @@ function RolePendingDoneDashboard({
   user,
   queryKey,
   queryFn,
+  emptyState,
 }: {
   user: ShellUser;
   queryKey: string;
   queryFn: (f: DateFilter) => Promise<RoleDashboardData>;
+  /** Shown instead of the usual snapshot/pending/done view once data has loaded, if isEmpty(data) is true. */
+  emptyState?: { isEmpty: (data: RoleDashboardData) => boolean; message: string };
 }) {
   const [dateFilter, setDateFilter] = React.useState<DateFilter>(NO_FILTER);
   const q = useQuery({ queryKey: [queryKey, dateFilter], queryFn: () => queryFn(dateFilter) });
@@ -310,6 +348,18 @@ function RolePendingDoneDashboard({
   }
   function toggleGroup(key: string) {
     setOpenGroups((s) => ({ ...s, [key]: !isGroupOpen(key) }));
+  }
+
+  if (!q.isLoading && q.data && emptyState?.isEmpty(q.data)) {
+    return (
+      <div>
+        <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">{greeting()}, {user.name.split(" ")[0]}</h1>
+          <span className="text-sm text-muted-foreground">{todayLong()}</span>
+        </div>
+        <p className="mt-4 text-sm text-muted-foreground">{emptyState.message}</p>
+      </div>
+    );
   }
 
   return (
@@ -381,10 +431,17 @@ function RolePendingDoneDashboard({
   );
 }
 
-function TelecallerDashboard({ user }: { user: ShellUser }) {
-  return <RolePendingDoneDashboard user={user} queryKey="dashboard-telecaller" queryFn={getTelecallerDashboard} />;
-}
-
-function LmaDashboard({ user }: { user: ShellUser }) {
-  return <RolePendingDoneDashboard user={user} queryKey="dashboard-lma" queryFn={getLmaDashboard} />;
+/** Every non-admin role — renders only the stages the logged-in user is a member of in stage_pools. */
+function PoolDashboard({ user }: { user: ShellUser }) {
+  return (
+    <RolePendingDoneDashboard
+      user={user}
+      queryKey="dashboard-pool"
+      queryFn={getPoolDashboard}
+      emptyState={{
+        isEmpty: (data) => (data.myStages?.length ?? 0) === 0,
+        message: "You haven't been added to any stage pools yet. Contact your admin to get assigned.",
+      }}
+    />
+  );
 }
