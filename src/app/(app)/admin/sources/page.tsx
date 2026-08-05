@@ -28,26 +28,23 @@ import {
 type SourceRow = { source_name: string; priority_score: number; is_active: boolean; form_url?: string | null };
 
 const APPS_SCRIPT = `/**
- * UNIVERSAL AstroLokal CRM — Google Apps Script
+ * UNIVERSAL AstroLokal CRM — Google Apps Script  (CRM edition, no Supabase)
  *
  * Paste this into ANY Google Form's Script Editor.
- * Zero changes needed — source name and question titles are auto-detected.
  *
  * Setup:
- *   1. Paste this script into Script Editor
- *   2. Set trigger: onFormSubmit → On form submit
- *   3. Done.
+ *   1. Paste this script
+ *   2. Set SOURCE_NAME below to this form's CRM source (e.g. "Referral").
+ *      Leave "" to use the form's title as the source.
+ *   3. New form only: run setupTrigger() once. (Skip if this form already
+ *      has a working trigger.)
  */
 
-var EDGE_FUNCTION_URL = "https://rswuytyoxpaqcbwfowyw.supabase.co/functions/v1/intake-lead";
-var SUPABASE_ANON_KEY  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJzd3V5dHlveHBhcWNid2Zvd3l3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1NjI1MjAsImV4cCI6MjEwMDEzODUyMH0.O2Qe5y63arcxr2uekmH04aMXDKFkXlzznS0ydWebVzs";
-var SUPABASE_URL       = "https://rswuytyoxpaqcbwfowyw.supabase.co";
-var NOTIFY_EMAILS      = ["shrushti.chavan@getlokalapp.com", "tejaswi@getlokalapp.com"];
+var INTAKE_URL   = "https://dev-astro-astrolokalcrm.astrolokal.com/api/intake-lead";
+var SOURCE_NAME  = "";
+var NOTIFY_EMAILS = ["shrushti.chavan@getlokalapp.com", "tejaswi@getlokalapp.com"];
 
 // ─── Fuzzy field detection ───────────────────────────────────────────────────
-// For each CRM field, list every question title variant you've ever used
-// across all your forms, all lowercase. The script will match case-insensitively.
-
 var FIELD_VARIANTS = {
   name: [
     "full name", "name", "your name", "applicant name"
@@ -71,79 +68,25 @@ var FIELD_VARIANTS = {
   ]
 };
 
-// ─── Source auto-detection ───────────────────────────────────────────────────
-// Reads the form's own title, then looks it up in your CRM's sources table.
-// The form title must contain the source name (case-insensitive partial match).
-// e.g. form titled "AstroLokal Referral Program" will match source "Referral"
-
-function detectSource_(formTitle) {
-  try {
-    var response = UrlFetchApp.fetch(
-      SUPABASE_URL + "/rest/v1/source_priority_config?select=source&is_active=eq.true",
-      {
-        method: "get",
-        headers: {
-          "apikey": SUPABASE_ANON_KEY,
-          "Authorization": "Bearer " + SUPABASE_ANON_KEY
-        },
-        muteHttpExceptions: true
-      }
-    );
-
-    if (response.getResponseCode() !== 200) {
-      Logger.log("Could not fetch sources: " + response.getContentText());
-      return formTitle; // fallback: use the full form title as source
-    }
-
-    var sources = JSON.parse(response.getContentText());
-    var lowerTitle = formTitle.toLowerCase();
-
-    // Try to find a source whose name appears in the form title
-    for (var i = 0; i < sources.length; i++) {
-      var sourceName = sources[i].source;
-      if (lowerTitle.indexOf(sourceName.toLowerCase()) !== -1) {
-        return sourceName;
-      }
-    }
-
-    // No match found — fall back to form title itself
-    // (this will still create the lead, just with an unrecognised source)
-    Logger.log("No source matched for form title: " + formTitle + ". Using title as source.");
-    return formTitle;
-
-  } catch (err) {
-    Logger.log("Source detection failed: " + err.message);
-    return formTitle;
-  }
-}
-
-// ─── Fuzzy field matching ────────────────────────────────────────────────────
-
 function detectField_(raw, fieldKey) {
   var variants = FIELD_VARIANTS[fieldKey] || [];
   var rawKeysLower = {};
-
-  // Build a lowercase → original key map
   for (var key in raw) {
     if (Object.prototype.hasOwnProperty.call(raw, key)) {
       rawKeysLower[key.toLowerCase().trim()] = key;
     }
   }
-
   for (var i = 0; i < variants.length; i++) {
     var variant = variants[i].toLowerCase().trim();
     if (rawKeysLower[variant]) {
-      var originalKey = rawKeysLower[variant];
-      var value = raw[originalKey];
+      var value = raw[rawKeysLower[variant]];
       return value ? String(value).trim() : null;
     }
   }
-
-  return null; // field not found on this form
+  return null;
 }
 
 // ─── Core submission logic ───────────────────────────────────────────────────
-
 function onFormSubmit(e) {
   var raw = getRawAnswers_(e);
   var formTitle = FormApp.getActiveForm().getTitle();
@@ -151,57 +94,51 @@ function onFormSubmit(e) {
 }
 
 function processSubmission_(raw, formTitle) {
-  var source  = detectSource_(formTitle);
-
   var payload = {
     name:     detectField_(raw, "name")    || "",
     contact:  detectField_(raw, "contact") || "",
     email:    detectField_(raw, "email"),
     city:     detectField_(raw, "city"),
     language: detectField_(raw, "language"),
-    source:   source
+    source:   SOURCE_NAME || formTitle
   };
 
   Logger.log("Submitting payload: " + JSON.stringify(payload));
 
   try {
-    var response = UrlFetchApp.fetch(EDGE_FUNCTION_URL, {
+    var response = UrlFetchApp.fetch(INTAKE_URL, {
       method: "post",
       contentType: "application/json",
-      headers: { Authorization: "Bearer " + SUPABASE_ANON_KEY },
       payload: JSON.stringify(payload),
       muteHttpExceptions: true
     });
 
     var code = response.getResponseCode();
-    if (code !== 200 && code !== 201) {
-      notifyFailure_(raw, formTitle, "HTTP " + code + ": " + response.getContentText());
+    if (code === 200 || code === 201) {
+      Logger.log("Lead submitted successfully.");
+    } else if (code === 409) {
+      // Duplicate — the CRM logged it in its duplicate list; no email needed.
+      Logger.log("Duplicate blocked by CRM: " + response.getContentText());
     } else {
-      Logger.log("Lead submitted successfully. Source: " + source);
+      notifyFailure_(raw, formTitle, "HTTP " + code + ": " + response.getContentText());
     }
   } catch (err) {
     notifyFailure_(raw, formTitle, "Request failed: " + err.message);
   }
 }
 
-// ─── Test runner ─────────────────────────────────────────────────────────────
-// Run this manually from the Script Editor to test without a real submission.
-
+// ─── Test runner (run manually from the editor) ──────────────────────────────
 function testWithDummySubmission() {
   var raw = {};
   raw["Full Name"]    = "Test Person";
   raw["Phone Number"] = "8888888888";
   raw["City you are currently based in"] = "Pune";
   raw["Which languages can you conduct full consultations in — both speaking and chat? (Primary Language)"] = "Marathi";
-
-  var formTitle = FormApp.getActiveForm().getTitle();
-  Logger.log("Form title: " + formTitle);
-  processSubmission_(raw, formTitle);
+  processSubmission_(raw, FormApp.getActiveForm().getTitle());
   Logger.log("Done. Check CRM All Leads or your inbox if it failed.");
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
 function getRawAnswers_(e) {
   var raw = {};
   var itemResponses = e.response.getItemResponses();
@@ -227,33 +164,26 @@ function notifyFailure_(raw, formTitle, errorDetail) {
       lines.push(key + ": " + raw[key]);
     }
   }
-
   MailApp.sendEmail({
     to: NOTIFY_EMAILS.join(","),
     subject: "Lead intake failed - " + formTitle,
-    body: lines.join("\\n")
+    body: lines.join("\n")
   });
 }
-// ─── One-time setup ───────────────────────────────────────────────────────────
-// Run this ONCE after pasting the script. Never run it again.
-// It creates the onFormSubmit trigger automatically.
 
+// ─── One-time setup (new forms only) ─────────────────────────────────────────
 function setupTrigger() {
-  // Delete any existing onFormSubmit triggers first (prevents duplicates)
   var triggers = ScriptApp.getProjectTriggers();
   for (var i = 0; i < triggers.length; i++) {
     if (triggers[i].getHandlerFunction() === "onFormSubmit") {
       ScriptApp.deleteTrigger(triggers[i]);
     }
   }
-
-  // Create a fresh trigger
   ScriptApp.newTrigger("onFormSubmit")
     .forForm(FormApp.getActiveForm())
     .onFormSubmit()
     .create();
-
-  Logger.log("✅ Trigger set! This form will now send leads to the CRM automatically.");
+  Logger.log("Trigger set! This form will now send leads to the CRM automatically.");
 }
 `;
 
