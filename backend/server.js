@@ -26,6 +26,17 @@ app.get("/health", async (req, res) => {
   }
 });
 
+app.get("/api/sources", async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      "SELECT source_name FROM source_priority_config WHERE is_active = true"
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 app.post("/api/intake-lead", handleIntakeLead);
 
 const PORT = process.env.PORT || 3000;
